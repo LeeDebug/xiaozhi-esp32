@@ -132,9 +132,9 @@ private:
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
             .vendor_config = &vendor_config,
         };
         esp_lcd_new_panel_st7703(io, &lcd_dev_config, &disp_panel);
@@ -170,9 +170,9 @@ private:
     };
 
     const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
             .vendor_config = &vendor_config,
     };
     esp_lcd_new_panel_st7701(io, &lcd_dev_config, &disp_panel);
@@ -203,13 +203,13 @@ private:
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
-            .vendor_config = &vendor_config,
             .flags = {
                 .reset_active_high = true,
             },
+            .vendor_config = &vendor_config,
         };
         esp_lcd_new_panel_hx8394(io, &lcd_dev_config, &disp_panel);
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_7B
@@ -238,9 +238,9 @@ private:
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
             .vendor_config = &vendor_config,
         };
         esp_lcd_new_panel_ek79007(io, &lcd_dev_config, &disp_panel);
@@ -273,9 +273,9 @@ private:
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
             .vendor_config = &vendor_config,
         };
         esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
@@ -308,9 +308,9 @@ private:
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
             .vendor_config = &vendor_config,
         };
         esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
@@ -343,9 +343,9 @@ private:
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
+            .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
-            .reset_gpio_num = PIN_NUM_LCD_RST,
             .vendor_config = &vendor_config,
         };
         esp_lcd_new_panel_ili9881c(io, &lcd_dev_config, &disp_panel);
