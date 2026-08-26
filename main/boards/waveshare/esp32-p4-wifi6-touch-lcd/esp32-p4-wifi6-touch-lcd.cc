@@ -137,7 +137,10 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_st7703(io, &lcd_dev_config, &disp_panel);
+        if (esp_lcd_new_panel_st7703(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create ST7703 panel");
+            return;
+        }
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_4_3
     esp_lcd_dpi_panel_config_t dpi_config = {                                                 
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,  
@@ -175,7 +178,10 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
     };
-    esp_lcd_new_panel_st7701(io, &lcd_dev_config, &disp_panel);
+    if (esp_lcd_new_panel_st7701(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create ST7701 panel");
+        return;
+    }
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_5
         esp_lcd_dpi_panel_config_t dpi_config = {
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
@@ -211,7 +217,10 @@ private:
             },
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_hx8394(io, &lcd_dev_config, &disp_panel);
+        if (esp_lcd_new_panel_hx8394(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create HX8394 panel");
+            return;
+        }
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_7B
     esp_lcd_dpi_panel_config_t dpi_config = {
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
@@ -243,7 +252,10 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_ek79007(io, &lcd_dev_config, &disp_panel);
+        if (esp_lcd_new_panel_ek79007(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create EK79007 panel");
+            return;
+        }
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_3_4C || CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_4C
     esp_lcd_dpi_panel_config_t dpi_config = {
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
@@ -270,6 +282,9 @@ private:
                 .dpi_config = &dpi_config,
                 .lane_num = 2,
             },
+            .flags = {
+                .skip_read_id = true,
+            },
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
@@ -278,7 +293,10 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
+        if (esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create JD9365 panel");
+            return;
+        }
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_8    || CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_10_1
     esp_lcd_dpi_panel_config_t dpi_config = {
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
@@ -305,6 +323,9 @@ private:
                 .dpi_config = &dpi_config,
                 .lane_num = 2,
             },
+            .flags = {
+                .skip_read_id = true,
+            },
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
@@ -313,7 +334,10 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
+        if (esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create JD9365 panel");
+            return;
+        }
 #elif CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_WIFI6_TOUCH_LCD_7
     esp_lcd_dpi_panel_config_t dpi_config = {
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
@@ -348,10 +372,13 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_ili9881c(io, &lcd_dev_config, &disp_panel);
+        if (esp_lcd_new_panel_ili9881c(io, &lcd_dev_config, &disp_panel) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create ILI9881C panel");
+            return;
+        }
 #endif
-        esp_lcd_panel_reset(disp_panel);
-        esp_lcd_panel_init(disp_panel);
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(disp_panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(disp_panel));
 
         display_ = new MipiLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                        DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
