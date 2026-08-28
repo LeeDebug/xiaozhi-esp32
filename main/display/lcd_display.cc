@@ -10,7 +10,6 @@
 #include <esp_psram.h>
 #include <material_symbols.h>
 #include <noto_emoji.h>
-#include <font_awesome.h>
 #include <src/misc/cache/lv_cache.h>
 #include <algorithm>
 #include <cstring>
@@ -434,7 +433,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
 
     settings_label_ = lv_label_create(right_icons);
-    lv_label_set_text(settings_label_, FONT_AWESOME_GEAR);
+    lv_label_set_text(settings_label_, MATERIAL_SYMBOLS_SETTINGS);
     lv_obj_set_style_text_font(settings_label_, icon_font, 0);
     lv_obj_set_style_text_color(settings_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(settings_label_, lvgl_theme->spacing(2), 0);
@@ -1171,7 +1170,7 @@ void LcdDisplay::CreateSettingsPage() {
     lv_obj_add_flag(settings_back_btn_, LV_OBJ_FLAG_CLICKABLE);
     auto* back_icon = lv_label_create(settings_back_btn_);
     lv_obj_set_style_text_font(back_icon, icon_font, 0);
-    lv_label_set_text(back_icon, FONT_AWESOME_ARROW_LEFT);
+    lv_label_set_text(back_icon, MATERIAL_SYMBOLS_ARROW_BACK);
     lv_obj_add_event_cb(settings_back_btn_, [](lv_event_t* event) {
         auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
         if (display != nullptr) {
