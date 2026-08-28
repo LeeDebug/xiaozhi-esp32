@@ -29,6 +29,18 @@ protected:
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
+
+    // Settings page objects
+    lv_obj_t* settings_label_ = nullptr;   // Gear icon in top bar
+    lv_obj_t* settings_page_ = nullptr;       // Settings page container
+    lv_obj_t* settings_title_ = nullptr;      // Settings page title
+    lv_obj_t* settings_list_ = nullptr;       // List of settings items
+    lv_obj_t* settings_back_btn_ = nullptr;   // Back button on settings page
+    lv_obj_t* settings_battery_value_ = nullptr;
+    lv_obj_t* settings_brightness_value_ = nullptr;
+    lv_obj_t* settings_volume_value_ = nullptr;
+    lv_obj_t* settings_network_value_ = nullptr;
+    lv_obj_t* settings_wake_word_value_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
@@ -51,6 +63,11 @@ public:
     virtual void SetupUI() override;
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
+
+    // Settings page helpers
+    void CreateSettingsPage();
+    void ShowSettingsPage(bool show);
+    void RefreshSettingsPage();
 
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);

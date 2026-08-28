@@ -10,6 +10,7 @@
 #include <esp_psram.h>
 #include <material_symbols.h>
 #include <noto_emoji.h>
+#include <font_awesome.h>
 #include <src/misc/cache/lv_cache.h>
 #include <algorithm>
 #include <cstring>
@@ -306,6 +307,10 @@ LcdDisplay::~LcdDisplay() {
     if (preview_image_ != nullptr) {
         lv_obj_del(preview_image_);
     }
+    if (settings_page_ != nullptr) {
+        lv_obj_del(settings_page_);
+        settings_page_ = nullptr;
+    }
     if (chat_message_label_ != nullptr) {
         lv_obj_del(chat_message_label_);
     }
@@ -427,6 +432,21 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
+
+    settings_label_ = lv_label_create(right_icons);
+    lv_label_set_text(settings_label_, FONT_AWESOME_GEAR);
+    lv_obj_set_style_text_font(settings_label_, icon_font, 0);
+    lv_obj_set_style_text_color(settings_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_left(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_left(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_right(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_add_flag(settings_label_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(settings_label_, [](lv_event_t* event) {
+        auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+        if (display != nullptr) {
+            display->ShowSettingsPage(true);
+        }
+    }, LV_EVENT_CLICKED, this);
 
     /* Layer 2: Status bar - for center text labels */
     status_bar_ = lv_obj_create(screen);
@@ -915,6 +935,21 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
 
+    settings_label_ = lv_label_create(right_icons);
+    lv_label_set_text(settings_label_, FONT_AWESOME_GEAR);
+    lv_obj_set_style_text_font(settings_label_, icon_font, 0);
+    lv_obj_set_style_text_color(settings_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_left(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_left(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_right(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_add_flag(settings_label_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(settings_label_, [](lv_event_t* event) {
+        auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+        if (display != nullptr) {
+            display->ShowSettingsPage(true);
+        }
+    }, LV_EVENT_CLICKED, this);
+
     /* Layer 2: Status bar - for center text labels */
     status_bar_ = lv_obj_create(screen);
     lv_obj_set_size(status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
@@ -1097,6 +1132,184 @@ void LcdDisplay::ClearChatMessages() {
 }
 #endif
 
+void LcdDisplay::CreateSettingsPage() {
+    if (settings_page_ != nullptr) {
+        return;
+    }
+
+    auto* theme = static_cast<LvglTheme*>(current_theme_);
+    auto* screen = lv_screen_active();
+    const auto* text_font = theme->text_font()->font();
+    const auto* icon_font = theme->icon_font()->font();
+
+    settings_page_ = lv_obj_create(screen);
+    lv_obj_set_size(settings_page_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(settings_page_, 0, 0);
+    lv_obj_set_style_radius(settings_page_, 0, 0);
+    lv_obj_set_style_pad_all(settings_page_, theme->spacing(4), 0);
+    lv_obj_set_style_border_width(settings_page_, 0, 0);
+    lv_obj_set_style_bg_color(settings_page_, theme->background_color(), 0);
+    lv_obj_set_style_text_color(settings_page_, theme->text_color(), 0);
+    lv_obj_set_flex_flow(settings_page_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(settings_page_, theme->spacing(3), 0);
+    lv_obj_set_scrollbar_mode(settings_page_, LV_SCROLLBAR_MODE_OFF);
+
+    auto* header = lv_obj_create(settings_page_);
+    lv_obj_set_width(header, LV_PCT(100));
+    lv_obj_set_height(header, text_font->line_height + theme->spacing(4));
+    lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(header, 0, 0);
+    lv_obj_set_style_pad_all(header, 0, 0);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    settings_back_btn_ = lv_obj_create(header);
+    lv_obj_set_size(settings_back_btn_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(settings_back_btn_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(settings_back_btn_, 0, 0);
+    lv_obj_set_style_shadow_width(settings_back_btn_, 0, 0);
+    lv_obj_add_flag(settings_back_btn_, LV_OBJ_FLAG_CLICKABLE);
+    auto* back_icon = lv_label_create(settings_back_btn_);
+    lv_obj_set_style_text_font(back_icon, icon_font, 0);
+    lv_label_set_text(back_icon, FONT_AWESOME_ARROW_LEFT);
+    lv_obj_add_event_cb(settings_back_btn_, [](lv_event_t* event) {
+        auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+        if (display != nullptr) {
+            display->ShowSettingsPage(false);
+        }
+    }, LV_EVENT_CLICKED, this);
+
+    settings_title_ = lv_label_create(header);
+    lv_label_set_text(settings_title_, "Settings");
+    lv_obj_set_style_text_font(settings_title_, text_font, 0);
+    lv_obj_set_style_margin_left(settings_title_, theme->spacing(3), 0);
+
+    settings_list_ = lv_obj_create(settings_page_);
+    lv_obj_set_width(settings_list_, LV_PCT(100));
+    lv_obj_set_flex_grow(settings_list_, 1);
+    lv_obj_set_style_pad_all(settings_list_, theme->spacing(2), 0);
+    lv_obj_set_style_pad_row(settings_list_, theme->spacing(2), 0);
+    lv_obj_set_style_radius(settings_list_, theme->spacing(2), 0);
+    lv_obj_set_style_border_width(settings_list_, 0, 0);
+    lv_obj_set_style_bg_color(settings_list_, theme->chat_background_color(), 0);
+    lv_obj_set_flex_flow(settings_list_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scrollbar_mode(settings_list_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(settings_list_, LV_DIR_VER);
+
+    auto add_row = [this, theme, text_font](const char* title, lv_obj_t** value) {
+        auto* row = lv_obj_create(settings_list_);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_style_min_height(row, text_font->line_height + theme->spacing(3), 0);
+        lv_obj_set_style_pad_left(row, theme->spacing(2), 0);
+        lv_obj_set_style_pad_right(row, theme->spacing(2), 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_radius(row, theme->spacing(1), 0);
+        lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        auto* name = lv_label_create(row);
+        lv_label_set_text(name, title);
+        *value = lv_label_create(row);
+        lv_label_set_text(*value, "-");
+        lv_label_set_long_mode(*value, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(*value, LV_PCT(55));
+        lv_obj_set_style_text_align(*value, LV_TEXT_ALIGN_RIGHT, 0);
+    };
+
+    add_row("Battery", &settings_battery_value_);
+    add_row("Brightness", &settings_brightness_value_);
+    add_row("Volume", &settings_volume_value_);
+    add_row("Network", &settings_network_value_);
+    add_row("Wake word", &settings_wake_word_value_);
+    lv_obj_add_flag(settings_page_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LcdDisplay::RefreshSettingsPage() {
+    if (settings_page_ == nullptr) {
+        return;
+    }
+
+    auto& board = Board::GetInstance();
+    char text[128];
+    int level = 0;
+    bool charging = false;
+    bool discharging = false;
+    if (board.GetBatteryLevel(level, charging, discharging)) {
+        snprintf(text, sizeof(text), "%d%% %s", level, charging ? "(charging)" : "");
+        lv_label_set_text(settings_battery_value_, text);
+    } else {
+        lv_label_set_text(settings_battery_value_, "Not supported");
+    }
+
+    if (auto* backlight = board.GetBacklight()) {
+        snprintf(text, sizeof(text), "%u%%", backlight->brightness());
+        lv_label_set_text(settings_brightness_value_, text);
+    } else {
+        lv_label_set_text(settings_brightness_value_, "Not supported");
+    }
+
+    if (auto* codec = board.GetAudioCodec()) {
+        snprintf(text, sizeof(text), "%d%%", codec->output_volume());
+        lv_label_set_text(settings_volume_value_, text);
+    } else {
+        lv_label_set_text(settings_volume_value_, "Not supported");
+    }
+
+    auto board_json = board.GetBoardJson();
+    auto ssid_pos = board_json.find("\"ssid\":\"");
+    auto rssi_pos = board_json.find("\"rssi\":");
+    if (ssid_pos != std::string::npos) {
+        ssid_pos += 8;
+        auto ssid_end = board_json.find('"', ssid_pos);
+        auto ssid = board_json.substr(ssid_pos, ssid_end - ssid_pos);
+        if (rssi_pos != std::string::npos) {
+            rssi_pos += 8;
+            auto rssi_end = board_json.find_first_of(",}", rssi_pos);
+            auto rssi = board_json.substr(rssi_pos, rssi_end - rssi_pos);
+            snprintf(text, sizeof(text), "%s (%s dBm)", ssid.c_str(), rssi.c_str());
+        } else {
+            snprintf(text, sizeof(text), "%s", ssid.c_str());
+        }
+    } else {
+        snprintf(text, sizeof(text), "Disconnected / config mode");
+    }
+    lv_label_set_text(settings_network_value_, text);
+    
+#if defined(CONFIG_CUSTOM_WAKE_WORD)
+    lv_label_set_text(settings_wake_word_value_, CONFIG_CUSTOM_WAKE_WORD_DISPLAY);
+#elif defined(CONFIG_USE_ESP_WAKE_WORD)
+    lv_label_set_text(settings_wake_word_value_, "ESP Wake Word");
+#elif defined(CONFIG_USE_AFE_WAKE_WORD)
+    lv_label_set_text(settings_wake_word_value_, "AFE Wake Word");
+#else
+    lv_label_set_text(settings_wake_word_value_, "Disabled / default");
+#endif
+}
+
+void LcdDisplay::ShowSettingsPage(bool show) {
+    DisplayLockGuard lock(this);
+    if (settings_page_ == nullptr) {
+        CreateSettingsPage();
+    }
+    if (settings_page_ == nullptr) {
+        return;
+    }
+    if (show) {
+        RefreshSettingsPage();
+        lv_obj_remove_flag(settings_page_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(settings_page_);
+    } else {
+        lv_obj_add_flag(settings_page_, LV_OBJ_FLAG_HIDDEN);
+        if (top_bar_ != nullptr) {
+            lv_obj_move_foreground(top_bar_);
+        }
+        if (status_bar_ != nullptr) {
+            lv_obj_move_foreground(status_bar_);
+        }
+    }
+}
+
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!",
@@ -1202,10 +1415,16 @@ void LcdDisplay::SetTheme(Theme* theme) {
         lv_obj_set_style_text_font(mute_label_, large_icon_font, 0);
         lv_obj_set_style_text_font(battery_label_, large_icon_font, 0);
         lv_obj_set_style_text_font(network_label_, large_icon_font, 0);
+        if (settings_label_ != nullptr) {
+            lv_obj_set_style_text_font(settings_label_, large_icon_font, 0);
+        }
     } else {
         lv_obj_set_style_text_font(mute_label_, icon_font, 0);
         lv_obj_set_style_text_font(battery_label_, icon_font, 0);
         lv_obj_set_style_text_font(network_label_, icon_font, 0);
+        if (settings_label_ != nullptr) {
+            lv_obj_set_style_text_font(settings_label_, icon_font, 0);
+        }
     }
 
     // Set parent text color
@@ -1232,6 +1451,9 @@ void LcdDisplay::SetTheme(Theme* theme) {
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
+    if (settings_label_ != nullptr) {
+        lv_obj_set_style_text_color(settings_label_, lvgl_theme->text_color(), 0);
+    }
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
 
     // If we have the chat message style, update all message bubbles
@@ -1324,6 +1546,17 @@ void LcdDisplay::SetTheme(Theme* theme) {
 
     // Update low battery popup
     lv_obj_set_style_bg_color(low_battery_popup_, lvgl_theme->low_battery_color(), 0);
+
+    if (settings_page_ != nullptr) {
+        lv_obj_set_style_bg_color(settings_page_, lvgl_theme->background_color(), 0);
+        lv_obj_set_style_text_color(settings_page_, lvgl_theme->text_color(), 0);
+        if (settings_list_ != nullptr) {
+            lv_obj_set_style_bg_color(settings_list_, lvgl_theme->chat_background_color(), 0);
+        }
+        if (settings_title_ != nullptr) {
+            lv_obj_set_style_text_color(settings_title_, lvgl_theme->text_color(), 0);
+        }
+    }
 
     // No errors occurred. Save theme to settings
     Display::SetTheme(lvgl_theme);
