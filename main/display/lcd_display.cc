@@ -15,6 +15,7 @@
 #include <cstring>
 #include <vector>
 
+#include "audio_codec.h"
 #include "board.h"
 
 #define TAG "LcdDisplay"
