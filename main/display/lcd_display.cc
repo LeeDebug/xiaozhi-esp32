@@ -1345,9 +1345,9 @@ void LcdDisplay::ShowSettingsPage(bool show) {
         lv_obj_move_foreground(settings_page_);
     } else {
         lv_obj_add_flag(settings_page_, LV_OBJ_FLAG_HIDDEN);
-        if (top_bar_ != nullptr) {
-            lv_obj_move_foreground(top_bar_);
-        }
+        // top_bar_ is a child of the column flex container in chat-style UI.
+        // Moving it to the foreground changes its flex order and places it at the bottom.
+        // status_bar_ is attached directly to the screen, so it can be raised safely.
         if (status_bar_ != nullptr) {
             lv_obj_move_foreground(status_bar_);
         }
