@@ -440,6 +440,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_margin_left(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_left(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_right(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_top(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_ext_click_area(settings_label_, lvgl_theme->spacing(2));
     lv_obj_add_flag(settings_label_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(settings_label_, [](lv_event_t* event) {
         auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
@@ -459,7 +462,10 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
-    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);        // Overlap with top_bar_
+    // Make the transparent overlay transparent to touch: without LV_OBJ_FLAG_CLICKABLE
+    // it won't intercept taps over the top bar (e.g. the settings gear icon).
+    lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);        // Overlap with top_bar_ without blocking input
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.8);
@@ -467,6 +473,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(notification_label_, "");
     lv_obj_align(notification_label_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
     status_label_ = lv_label_create(status_bar_);
@@ -476,6 +483,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_CLICKABLE);
 
     /* Content - Chat area */
     content_ = lv_obj_create(container_);
@@ -942,6 +950,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_margin_left(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_left(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_right(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_top(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(settings_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_ext_click_area(settings_label_, lvgl_theme->spacing(2));
     lv_obj_add_flag(settings_label_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(settings_label_, [](lv_event_t* event) {
         auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
@@ -961,6 +972,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
+    // Make the transparent overlay transparent to touch: without LV_OBJ_FLAG_CLICKABLE
+    // it won't intercept taps over the top bar (e.g. the settings gear icon).
+    lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);        // Overlap with top_bar_
 
     notification_label_ = lv_label_create(status_bar_);
@@ -969,6 +983,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(notification_label_, "");
     lv_obj_align(notification_label_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
     status_label_ = lv_label_create(status_bar_);
@@ -978,6 +993,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_CLICKABLE);
 
 #if CONFIG_USE_MULTILINE_CHAT_MESSAGE
     /* Bottom bar - auto height, grows upward with wrapped text */

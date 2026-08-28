@@ -27,6 +27,7 @@
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <esp_lvgl_port.h>
+#include <esp_timer.h>
 #include "esp_lcd_touch_gt911.h"
 #define TAG "WaveshareEsp32p4nano"
 
@@ -80,6 +81,73 @@ private:
     LcdDisplay *display__;
     EspVideo* camera_ = nullptr;
     CustomBacklight *backlight_;
+    esp_lcd_touch_handle_t touch_ = nullptr;
+    static uint8_t touch_debug_prev_points_[CONFIG_ESP_LCD_TOUCH_MAX_POINTS];
+    static esp_lcd_touch_point_data_t
+        touch_debug_prev_coords_[CONFIG_ESP_LCD_TOUCH_MAX_POINTS];
+    esp_timer_handle_t touch_debug_timer_ = nullptr;
+
+    static void TouchDebugTimerCallback(void* arg) {
+        auto* self = static_cast<WaveshareEsp32p4nano*>(arg);
+        self->PollAndLogTouch();
+    }
+
+    // Debug helper: directly poll the GT911 touch controller (independent of LVGL)
+    // and print a serial log for every NEW/lifted screen tap. This proves whether
+    // the touch chip physically sees your finger and where it reports the point.
+    void PollAndLogTouch() {
+        if (touch_ == nullptr) return;
+
+        esp_err_t err = esp_lcd_touch_read_data(touch_);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Touch read_data failed: %s", esp_err_to_name(err));
+            return;
+        }
+
+        esp_lcd_touch_point_data_t points[CONFIG_ESP_LCD_TOUCH_MAX_POINTS];
+        uint8_t cnt = 0;
+        err = esp_lcd_touch_get_data(touch_, points, &cnt, CONFIG_ESP_LCD_TOUCH_MAX_POINTS);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Touch get_data failed: %s", esp_err_to_name(err));
+            return;
+        }
+
+        // Log when a new finger-touch appears (previous report had fewer/no points)
+        // and when a previously-touched point moves to a new location.
+        bool reported = false;
+        if (cnt > 0) {
+            for (uint8_t i = 0; i < cnt; i++) {
+                bool is_new = false;
+                if (i >= touch_debug_prev_points_[0]) {
+                    is_new = true;  // New finger / more fingers than before
+                } else {
+                    esp_lcd_touch_point_data_t& prev = touch_debug_prev_coords_[i];
+                    if (prev.x != points[i].x || prev.y != points[i].y) {
+                        is_new = true;  // Moved to a new position
+                    }
+                }
+                if (is_new) {
+                    ESP_LOGI(TAG,
+                             "[TOUCH DEBUG] Tapped: point[%d] raw=(%u,%u) strength=%u total=%u "
+                             "(swap=%u mirror_x=%u mirror_y=%u)",
+                             i, points[i].x, points[i].y, points[i].strength, cnt,
+                             touch_->config.flags.swap_xy, touch_->config.flags.mirror_x,
+                             touch_->config.flags.mirror_y);
+                    reported = true;
+                }
+            }
+        } else if (touch_debug_prev_points_[0] > 0) {
+            ESP_LOGI(TAG, "[TOUCH DEBUG] Finger lifted");
+            reported = true;
+        }
+
+        // Save current state for the next poll
+        touch_debug_prev_points_[0] = cnt;
+        for (uint8_t i = 0; i < cnt && i < CONFIG_ESP_LCD_TOUCH_MAX_POINTS; i++) {
+            touch_debug_prev_coords_[i] = points[i];
+        }
+        (void)reported;
+    }
 
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
@@ -224,12 +292,24 @@ private:
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle));
         ESP_LOGI(TAG, "Initialize touch controller");
         ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp));
+        touch_ = tp;
         const lvgl_port_touch_cfg_t touch_cfg = {
             .disp = lv_display_get_default(),
             .handle = tp,
         };
         lvgl_port_add_touch(&touch_cfg);
         ESP_LOGI(TAG, "Touch panel initialized successfully");
+
+        // Start a periodic debug monitor that polls the touch controller directly
+        // and prints tap coordinates to the serial log (independent of the LVGL input path).
+        esp_timer_create_args_t timer_args = {};
+        timer_args.callback = WaveshareEsp32p4nano::TouchDebugTimerCallback;
+        timer_args.arg = this;
+        timer_args.dispatch_method = ESP_TIMER_TASK;
+        timer_args.name = "touch_debug";
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &touch_debug_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(touch_debug_timer_, 100 * 1000));
+        ESP_LOGI(TAG, "Touch debug monitor started (polls every 100ms)");
     }
     void InitializeCamera() {
         esp_video_init_csi_config_t base_csi_config = {
@@ -296,5 +376,8 @@ public:
      }
 
 };
+
+uint8_t WaveshareEsp32p4nano::touch_debug_prev_points_[] = {0};
+esp_lcd_touch_point_data_t WaveshareEsp32p4nano::touch_debug_prev_coords_[] = {};
 
 DECLARE_BOARD(WaveshareEsp32p4nano);
