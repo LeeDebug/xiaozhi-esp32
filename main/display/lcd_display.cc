@@ -442,11 +442,24 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_right(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_top(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_bottom(settings_label_, lvgl_theme->spacing(2), 0);
-    lv_obj_set_ext_click_area(settings_label_, lvgl_theme->spacing(2));
+    lv_obj_set_ext_click_area(settings_label_, lvgl_theme->spacing(4));
+    // Guarantee a comfortable tap target (>= 2x icon height) regardless of the glyph size
+    // or flex layout, so the gear icon is always easy to hit.
+    lv_obj_set_style_min_width(settings_label_, icon_font->line_height * 2, 0);
+    lv_obj_set_style_min_height(settings_label_, icon_font->line_height * 2, 0);
     lv_obj_add_flag(settings_label_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(settings_label_, [](lv_event_t* event) {
         auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
         if (display != nullptr) {
+            // Log where LVGL actually received the tap. This reuses the point that LVGL
+            // already read from the touch controller (single reader - no extra GT911 polling),
+            // so it validates the raw -> screen coordinate mapping while we refine it.
+            lv_indev_t* indev = lv_indev_active();
+            lv_point_t pt = {0, 0};
+            if (indev != NULL) {
+                lv_indev_get_point(indev, &pt);
+            }
+            ESP_LOGI(TAG, "Settings icon tapped at LVGL (%d, %d)", pt.x, pt.y);
             display->ShowSettingsPage(true);
         }
     }, LV_EVENT_CLICKED, this);
@@ -462,8 +475,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
-    // Make the transparent overlay transparent to touch: without LV_OBJ_FLAG_CLICKABLE
-    // it won't intercept taps over the top bar (e.g. the settings gear icon).
+    // Transparent overlay must stay transparent to input: removing LV_OBJ_FLAG_CLICKABLE
+    // makes this object (and its non-clickable labels below) skipped by the LVGL hit-test,
+    // so taps over the top bar (e.g. the settings gear icon) always reach the widgets below.
     lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);        // Overlap with top_bar_ without blocking input
 
@@ -952,11 +966,24 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_right(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_top(settings_label_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_bottom(settings_label_, lvgl_theme->spacing(2), 0);
-    lv_obj_set_ext_click_area(settings_label_, lvgl_theme->spacing(2));
+    lv_obj_set_ext_click_area(settings_label_, lvgl_theme->spacing(4));
+    // Guarantee a comfortable tap target (>= 2x icon height) regardless of the glyph size
+    // or flex layout, so the gear icon is always easy to hit.
+    lv_obj_set_style_min_width(settings_label_, icon_font->line_height * 2, 0);
+    lv_obj_set_style_min_height(settings_label_, icon_font->line_height * 2, 0);
     lv_obj_add_flag(settings_label_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(settings_label_, [](lv_event_t* event) {
         auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
         if (display != nullptr) {
+            // Log where LVGL actually received the tap. This reuses the point that LVGL
+            // already read from the touch controller (single reader - no extra GT911 polling),
+            // so it validates the raw -> screen coordinate mapping while we refine it.
+            lv_indev_t* indev = lv_indev_active();
+            lv_point_t pt = {0, 0};
+            if (indev != NULL) {
+                lv_indev_get_point(indev, &pt);
+            }
+            ESP_LOGI(TAG, "Settings icon tapped at LVGL (%d, %d)", pt.x, pt.y);
             display->ShowSettingsPage(true);
         }
     }, LV_EVENT_CLICKED, this);
@@ -972,8 +999,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
-    // Make the transparent overlay transparent to touch: without LV_OBJ_FLAG_CLICKABLE
-    // it won't intercept taps over the top bar (e.g. the settings gear icon).
+    // Transparent overlay must stay transparent to input: removing LV_OBJ_FLAG_CLICKABLE
+    // makes this object (and its non-clickable labels below) skipped by the LVGL hit-test,
+    // so taps over the top bar (e.g. the settings gear icon) always reach the widgets below.
     lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);        // Overlap with top_bar_
 
