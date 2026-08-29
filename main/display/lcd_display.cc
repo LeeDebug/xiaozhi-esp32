@@ -411,6 +411,14 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+    // Match the right icons container height so the WiFi icon text baseline aligns
+    // with the mute/settings icons. Without this, the network_label_ (height = line_height)
+    // is vertically centered in a top_bar flex row whose height is determined by the
+    // taller right_icons container (2*line_height), pushing the WiFi glyph line_height/2
+    // pixels lower than the right-side icons.
+    lv_obj_set_style_pad_top(network_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(network_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_min_height(network_label_, icon_font->line_height * 2, 0);
 
     // Right icons container
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
@@ -426,12 +434,21 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
+    // Match the settings_label_ height so the mute icon text baseline aligns
+    // with the settings icon in the same container.
+    lv_obj_set_style_pad_top(mute_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(mute_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_min_height(mute_label_, icon_font->line_height * 2, 0);
 
     battery_label_ = lv_label_create(right_icons);
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
+    // Match the settings_label_ height so the battery icon text baseline aligns.
+    lv_obj_set_style_pad_top(battery_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(battery_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_min_height(battery_label_, icon_font->line_height * 2, 0);
 
     settings_label_ = lv_label_create(right_icons);
     lv_label_set_text(settings_label_, MATERIAL_SYMBOLS_SETTINGS);
@@ -935,6 +952,14 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+    // Match the right icons container height so the WiFi icon text baseline aligns
+    // with the mute/settings icons. Without this, the network_label_ (height = line_height)
+    // is vertically centered in a top_bar flex row whose height is determined by the
+    // taller right_icons container (2*line_height), pushing the WiFi glyph line_height/2
+    // pixels lower than the right-side icons.
+    lv_obj_set_style_pad_top(network_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(network_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_min_height(network_label_, icon_font->line_height * 2, 0);
 
     // Right icons container
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
@@ -950,12 +975,21 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(mute_label_, "");
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
+    // Match the settings_label_ height so the mute icon text baseline aligns
+    // with the settings icon in the same container.
+    lv_obj_set_style_pad_top(mute_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(mute_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_min_height(mute_label_, icon_font->line_height * 2, 0);
 
     battery_label_ = lv_label_create(right_icons);
     lv_label_set_text(battery_label_, "");
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
+    // Match the settings_label_ height so the battery icon text baseline aligns.
+    lv_obj_set_style_pad_top(battery_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(battery_label_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_min_height(battery_label_, icon_font->line_height * 2, 0);
 
     settings_label_ = lv_label_create(right_icons);
     lv_label_set_text(settings_label_, FONT_AWESOME_GEAR);
@@ -1197,6 +1231,9 @@ void LcdDisplay::CreateSettingsPage() {
     lv_obj_set_flex_flow(settings_page_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(settings_page_, theme->spacing(3), 0);
     lv_obj_set_scrollbar_mode(settings_page_, LV_SCROLLBAR_MODE_OFF);
+    // The settings page itself must never scroll: only settings_list_ scrolls.
+    // Otherwise the header (back button / title) scrolls away with the list content.
+    lv_obj_set_scroll_dir(settings_page_, LV_DIR_NONE);
 
     auto* header = lv_obj_create(settings_page_);
     lv_obj_set_width(header, LV_PCT(100));
@@ -1204,6 +1241,9 @@ void LcdDisplay::CreateSettingsPage() {
     lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(header, 0, 0);
     lv_obj_set_style_pad_all(header, 0, 0);
+    // Keep the header fixed-size inside the column flex layout
+    lv_obj_set_style_flex_shrink(header, 0, 0);
+    lv_obj_set_style_flex_grow(header, 0, 0);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
