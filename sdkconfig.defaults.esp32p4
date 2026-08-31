@@ -16,6 +16,15 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 
+# ESP32-P4-NANO connects its ESP32-C6 WiFi/BT co-processor via SDIO.
+# These must be forced explicitly: the esp_hosted Kconfig choice can otherwise
+# resolve to ESP32-H2 + SPI when esp_wifi_remote's Kconfig symbols are not yet
+# visible, which makes the slave never become ready (task watchdog hang).
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+
 CONFIG_SR_WN_WN9_NIHAOXIAOZHI_TTS=y
 
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y

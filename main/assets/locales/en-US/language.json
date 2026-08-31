@@ -54,6 +54,9 @@
         "FOUND_NEW_ASSETS": "Found new assets: %s",
         "DOWNLOAD_ASSETS_FAILED": "Failed to download assets",
         "LOADING_ASSETS": "Loading assets...",
-        "HELLO_MY_FRIEND": "Hello, my friend!"
+        "HELLO_MY_FRIEND": "Hello, my friend!",
+        "VIEW_HISTORY": "View History",
+        "HISTORY_TITLE": "Chat History",
+        "NO_HISTORY": "No chat history yet"
     }
 }

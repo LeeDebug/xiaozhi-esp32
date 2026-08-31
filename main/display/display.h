@@ -49,6 +49,13 @@ public:
     virtual void SetEmojiCollection(std::shared_ptr<EmojiCollection>) {}
     virtual void SetupUI() { setup_ui_called_ = true; }
 
+    // 历史对话入口：待命态底部按钮的显隐
+    virtual void SetHistoryButtonVisible(bool visible) {}
+    // 历史对话页面：show=true 打开，false 关闭
+    virtual void ShowHistoryPage(bool show) {}
+    // 历史对话页面刷新（读取最新历史后重绘）
+    virtual void RefreshHistoryPage() {}
+
     inline int width() const { return width_; }
     inline int height() const { return height_; }
     inline bool IsSetupUICalled() const { return setup_ui_called_; }

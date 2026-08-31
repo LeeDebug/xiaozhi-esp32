@@ -41,6 +41,13 @@ protected:
     lv_obj_t* settings_volume_value_ = nullptr;
     lv_obj_t* settings_network_value_ = nullptr;
     lv_obj_t* settings_wake_word_value_ = nullptr;
+
+    // History page objects
+    lv_obj_t* history_btn_ = nullptr;        // Bottom "view history" button (idle only)
+    lv_obj_t* history_page_ = nullptr;       // History page container
+    lv_obj_t* history_title_ = nullptr;      // History page title
+    lv_obj_t* history_list_ = nullptr;       // Scrollable history list
+    lv_obj_t* history_back_btn_ = nullptr;   // Back button on history page
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
@@ -68,6 +75,14 @@ public:
     void CreateSettingsPage();
     void ShowSettingsPage(bool show);
     void RefreshSettingsPage();
+
+    // History page helpers
+    void CreateHistoryPage();
+    void ShowHistoryPage(bool show) override;
+    void RefreshHistoryPage() override;
+    void SetHistoryButtonVisible(bool visible) override;
+    void CreateHistoryButton();
+    void RefreshHistoryPageUnlocked();
 
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);

@@ -1,5 +1,6 @@
 #include "lcd_display.h"
 #include "assets/lang_config.h"
+#include "chat_history.h"
 #include "gif/lvgl_gif.h"
 #include "lvgl_theme.h"
 #include "settings.h"
@@ -311,6 +312,14 @@ LcdDisplay::~LcdDisplay() {
         lv_obj_del(settings_page_);
         settings_page_ = nullptr;
     }
+    if (history_page_ != nullptr) {
+        lv_obj_del(history_page_);
+        history_page_ = nullptr;
+    }
+    if (history_btn_ != nullptr) {
+        lv_obj_del(history_btn_);
+        history_btn_ = nullptr;
+    }
     if (chat_message_label_ != nullptr) {
         lv_obj_del(chat_message_label_);
     }
@@ -560,6 +569,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(emoji_label_, MATERIAL_SYMBOLS_ROBOT_2);
+
+    CreateHistoryButton();
 }
 #if CONFIG_IDF_TARGET_ESP32P4
 #define MAX_MESSAGES 40
@@ -1126,6 +1137,8 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+
+    CreateHistoryButton();
 }
 
 void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
@@ -1242,7 +1255,6 @@ void LcdDisplay::CreateSettingsPage() {
     lv_obj_set_style_border_width(header, 0, 0);
     lv_obj_set_style_pad_all(header, 0, 0);
     // Keep the header fixed-size inside the column flex layout
-    lv_obj_set_style_flex_shrink(header, 0, 0);
     lv_obj_set_style_flex_grow(header, 0, 0);
     lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1390,6 +1402,227 @@ void LcdDisplay::ShowSettingsPage(bool show) {
         // status_bar_ is attached directly to the screen, so it can be raised safely.
         if (status_bar_ != nullptr) {
             lv_obj_move_foreground(status_bar_);
+        }
+    }
+}
+
+void LcdDisplay::CreateHistoryButton() {
+    if (history_btn_ != nullptr) {
+        return;
+    }
+    auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    auto text_font = lvgl_theme->text_font()->font();
+
+    auto screen = lv_screen_active();
+
+    history_btn_ = lv_obj_create(screen);
+    lv_obj_set_size(history_btn_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_radius(history_btn_, lvgl_theme->spacing(3), 0);
+    lv_obj_set_style_bg_color(history_btn_, lvgl_theme->assistant_bubble_color(), 0);
+    lv_obj_set_style_bg_opa(history_btn_, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(history_btn_, 0, 0);
+    lv_obj_set_style_shadow_width(history_btn_, 0, 0);
+    lv_obj_set_style_pad_left(history_btn_, lvgl_theme->spacing(3), 0);
+    lv_obj_set_style_pad_right(history_btn_, lvgl_theme->spacing(3), 0);
+    lv_obj_set_style_pad_top(history_btn_, lvgl_theme->spacing(1), 0);
+    lv_obj_set_style_pad_bottom(history_btn_, lvgl_theme->spacing(1), 0);
+    lv_obj_set_scrollbar_mode(history_btn_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_align(history_btn_, LV_ALIGN_BOTTOM_MID, 0, -lvgl_theme->spacing(2));
+    // Hidden by default; Application toggles visibility for idle state.
+    lv_obj_add_flag(history_btn_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(history_btn_, LV_OBJ_FLAG_CLICKABLE);
+
+    auto* history_label = lv_label_create(history_btn_);
+    lv_label_set_text(history_label, Lang::Strings::VIEW_HISTORY);
+    lv_obj_set_style_text_font(history_label, text_font, 0);
+    lv_obj_set_style_text_color(history_label, lvgl_theme->text_color(), 0);
+
+    lv_obj_add_event_cb(history_btn_, [](lv_event_t* event) {
+        auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+        if (display != nullptr) {
+            display->ShowHistoryPage(true);
+        }
+    }, LV_EVENT_CLICKED, this);
+}
+
+void LcdDisplay::SetHistoryButtonVisible(bool visible) {
+    DisplayLockGuard lock(this);
+    if (history_btn_ == nullptr) {
+        return;
+    }
+    if (visible) {
+        lv_obj_remove_flag(history_btn_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(history_btn_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void LcdDisplay::CreateHistoryPage() {
+    if (history_page_ != nullptr) {
+        return;
+    }
+
+    auto* theme = static_cast<LvglTheme*>(current_theme_);
+    auto* screen = lv_screen_active();
+    const auto* text_font = theme->text_font()->font();
+    const auto* icon_font = theme->icon_font()->font();
+
+    history_page_ = lv_obj_create(screen);
+    lv_obj_set_size(history_page_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_pos(history_page_, 0, 0);
+    lv_obj_set_style_radius(history_page_, 0, 0);
+    lv_obj_set_style_pad_all(history_page_, theme->spacing(4), 0);
+    lv_obj_set_style_border_width(history_page_, 0, 0);
+    lv_obj_set_style_bg_color(history_page_, theme->background_color(), 0);
+    lv_obj_set_style_text_color(history_page_, theme->text_color(), 0);
+    lv_obj_set_flex_flow(history_page_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(history_page_, theme->spacing(3), 0);
+    lv_obj_set_scrollbar_mode(history_page_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(history_page_, LV_DIR_NONE);
+
+    auto* header = lv_obj_create(history_page_);
+    lv_obj_set_width(header, LV_PCT(100));
+    lv_obj_set_height(header, text_font->line_height + theme->spacing(4));
+    lv_obj_set_style_bg_opa(header, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(header, 0, 0);
+    lv_obj_set_style_pad_all(header, 0, 0);
+    lv_obj_set_style_flex_grow(header, 0, 0);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    history_back_btn_ = lv_obj_create(header);
+    lv_obj_set_size(history_back_btn_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(history_back_btn_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(history_back_btn_, 0, 0);
+    lv_obj_set_style_shadow_width(history_back_btn_, 0, 0);
+    lv_obj_add_flag(history_back_btn_, LV_OBJ_FLAG_CLICKABLE);
+    auto* back_icon = lv_label_create(history_back_btn_);
+    lv_obj_set_style_text_font(back_icon, icon_font, 0);
+    lv_label_set_text(back_icon, MATERIAL_SYMBOLS_ARROW_BACK);
+    lv_obj_add_event_cb(history_back_btn_, [](lv_event_t* event) {
+        auto* display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+        if (display != nullptr) {
+            display->ShowHistoryPage(false);
+        }
+    }, LV_EVENT_CLICKED, this);
+
+    history_title_ = lv_label_create(header);
+    lv_label_set_text(history_title_, Lang::Strings::HISTORY_TITLE);
+    lv_obj_set_style_text_font(history_title_, text_font, 0);
+    lv_obj_set_style_margin_left(history_title_, theme->spacing(3), 0);
+
+    history_list_ = lv_obj_create(history_page_);
+    lv_obj_set_width(history_list_, LV_PCT(100));
+    lv_obj_set_flex_grow(history_list_, 1);
+    lv_obj_set_style_pad_all(history_list_, theme->spacing(2), 0);
+    lv_obj_set_style_pad_row(history_list_, theme->spacing(2), 0);
+    lv_obj_set_style_radius(history_list_, theme->spacing(2), 0);
+    lv_obj_set_style_border_width(history_list_, 0, 0);
+    lv_obj_set_style_bg_color(history_list_, theme->chat_background_color(), 0);
+    lv_obj_set_flex_flow(history_list_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scrollbar_mode(history_list_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(history_list_, LV_DIR_VER);
+
+    lv_obj_add_flag(history_page_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LcdDisplay::RefreshHistoryPage() {
+    DisplayLockGuard lock(this);
+    RefreshHistoryPageUnlocked();
+}
+
+void LcdDisplay::RefreshHistoryPageUnlocked() {
+    if (history_list_ == nullptr) {
+        return;
+    }
+    // Note: assumes the caller holds the display lock (e.g. ShowHistoryPage).
+    auto* theme = static_cast<LvglTheme*>(current_theme_);
+    const auto* text_font = theme->text_font()->font();
+
+    // 清空旧条目
+    lv_obj_clean(history_list_);
+
+    auto history = ChatHistory::GetInstance().GetAll();
+    if (history.empty()) {
+        auto* empty = lv_label_create(history_list_);
+        lv_label_set_text(empty, Lang::Strings::NO_HISTORY);
+        lv_obj_set_style_text_font(empty, text_font, 0);
+        lv_obj_set_style_text_color(empty, theme->text_color(), 0);
+        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_width(empty, LV_PCT(100));
+        return;
+    }
+
+    for (const auto& e : history) {
+        const bool is_user = e.role == "user";
+        const bool is_system = e.role == "system";
+
+        // 行容器：用户消息右对齐，其他左对齐
+        auto* row = lv_obj_create(history_list_);
+        lv_obj_set_width(row, LV_PCT(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(row, 0, 0);
+        lv_obj_set_style_pad_all(row, 0, 0);
+        lv_obj_set_style_radius(row, 0, 0);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, is_user ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+        // 气泡
+        auto* bubble = lv_obj_create(row);
+        lv_obj_set_style_radius(bubble, theme->spacing(2), 0);
+        lv_obj_set_scrollbar_mode(bubble, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_set_style_border_width(bubble, 0, 0);
+        lv_obj_set_style_pad_all(bubble, theme->spacing(2), 0);
+        lv_obj_set_style_bg_opa(bubble, LV_OPA_70, 0);
+        if (is_user) {
+            lv_obj_set_style_bg_color(bubble, theme->user_bubble_color(), 0);
+        } else if (is_system) {
+            lv_obj_set_style_bg_color(bubble, theme->system_bubble_color(), 0);
+        } else {
+            lv_obj_set_style_bg_color(bubble, theme->assistant_bubble_color(), 0);
+        }
+
+        auto* text = lv_label_create(bubble);
+        lv_obj_set_style_text_font(text, text_font, 0);
+        lv_obj_set_style_text_color(text, theme->text_color(), 0);
+        lv_label_set_text(text, e.content.c_str());
+        lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(text, LV_HOR_RES * 85 / 100 - theme->spacing(4));
+
+        // 约束气泡宽度不超过屏幕的 85%
+        lv_obj_set_width(bubble, LV_HOR_RES * 85 / 100);
+    }
+}
+
+void LcdDisplay::ShowHistoryPage(bool show) {
+    DisplayLockGuard lock(this);
+    if (history_page_ == nullptr) {
+        CreateHistoryPage();
+    }
+    if (history_page_ == nullptr) {
+        return;
+    }
+
+    if (show) {
+        RefreshHistoryPageUnlocked();  // 调用方(ShowHistoryPage)已持有显示锁
+        lv_obj_remove_flag(history_page_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(history_page_);
+        // 打开历史页时隐藏待命态按钮，避免被覆盖（调用方已持有锁，直接操作对象）
+        if (history_btn_ != nullptr) {
+            lv_obj_add_flag(history_btn_, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        lv_obj_add_flag(history_page_, LV_OBJ_FLAG_HIDDEN);
+        if (status_bar_ != nullptr) {
+            lv_obj_move_foreground(status_bar_);
+        }
+        // 关闭历史页后恢复底部入口按钮（仅当设备仍处于待命状态时
+        // 由 Application 的 idle 状态处理逻辑负责保持显示；若已离开
+        // idle，Application 会立即再次隐藏该按钮）。
+        if (history_btn_ != nullptr) {
+            lv_obj_remove_flag(history_btn_, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
@@ -1640,6 +1873,24 @@ void LcdDisplay::SetTheme(Theme* theme) {
         if (settings_title_ != nullptr) {
             lv_obj_set_style_text_color(settings_title_, lvgl_theme->text_color(), 0);
         }
+    }
+
+    // Update history page colors to match the new theme
+    if (history_page_ != nullptr) {
+        lv_obj_set_style_bg_color(history_page_, lvgl_theme->background_color(), 0);
+        lv_obj_set_style_text_color(history_page_, lvgl_theme->text_color(), 0);
+        if (history_list_ != nullptr) {
+            lv_obj_set_style_bg_color(history_list_, lvgl_theme->chat_background_color(), 0);
+        }
+        if (history_title_ != nullptr) {
+            lv_obj_set_style_text_color(history_title_, lvgl_theme->text_color(), 0);
+        }
+    }
+
+    // Update history button colors to match the new theme
+    if (history_btn_ != nullptr) {
+        lv_obj_set_style_bg_color(history_btn_, lvgl_theme->assistant_bubble_color(), 0);
+        lv_obj_set_style_text_color(history_btn_, lvgl_theme->text_color(), 0);
     }
 
     // No errors occurred. Save theme to settings
