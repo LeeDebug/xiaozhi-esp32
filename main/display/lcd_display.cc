@@ -1003,7 +1003,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_min_height(battery_label_, icon_font->line_height * 2, 0);
 
     settings_label_ = lv_label_create(right_icons);
-    lv_label_set_text(settings_label_, FONT_AWESOME_GEAR);
+    lv_label_set_text(settings_label_, MATERIAL_SYMBOLS_SETTINGS);
     lv_obj_set_style_text_font(settings_label_, icon_font, 0);
     lv_obj_set_style_text_color(settings_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(settings_label_, lvgl_theme->spacing(2), 0);
