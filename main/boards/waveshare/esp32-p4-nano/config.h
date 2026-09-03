@@ -19,8 +19,8 @@
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_35
 
-#define DISPLAY_WIDTH 800
-#define DISPLAY_HEIGHT 1280
+#define DISPLAY_WIDTH 480
+#define DISPLAY_HEIGHT 1920
 
 #define LCD_BIT_PER_PIXEL          (16)
 #define PIN_NUM_LCD_RST            GPIO_NUM_NC

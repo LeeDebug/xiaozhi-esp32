@@ -63,12 +63,13 @@ protected:
             return;
         }
 
-        err = i2c_master_transmit(dev_handle, data, sizeof(data), -1);
+        err = i2c_master_transmit(dev_handle, data, sizeof(data), 100);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to transmit brightness: %s", esp_err_to_name(err));
         } else {
             ESP_LOGI(TAG, "Backlight brightness set to %u", brightness);
         }
+        i2c_master_bus_rm_device(dev_handle);
     }
 };
 
@@ -173,14 +174,23 @@ private:
 
         ESP_ERROR_CHECK(esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel));
         ESP_ERROR_CHECK(esp_lcd_panel_reset(disp_panel));
+        ESP_LOGI(TAG, "Initialize JD9365 LCD panel");
         ESP_ERROR_CHECK(esp_lcd_panel_init(disp_panel));
-        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(disp_panel, false));
-        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(disp_panel, true));
         display__ = new MipiLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                        DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
                                        DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        if (display__ == nullptr) {
+            ESP_LOGE(TAG, "Failed to allocate LCD display");
+            return;
+        }
         backlight_ = new CustomBacklight(codec_i2c_bus_);
+        if (backlight_ == nullptr) {
+            ESP_LOGE(TAG, "Failed to allocate LCD backlight controller");
+            return;
+        }
         backlight_->RestoreBrightness();
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(disp_panel, false));
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(disp_panel, true));
         ESP_LOGI(TAG, "LCD panel initialized successfully");
     }
 
