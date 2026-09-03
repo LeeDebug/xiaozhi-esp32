@@ -1048,6 +1048,11 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
         sdmmc
     )
 endif()
+if(CONFIG_BOARD_TYPE_WAVESHARE_ESP32_P4_NANO)
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA
+        waveshare__esp_lcd_jd9365
+    )
+endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
