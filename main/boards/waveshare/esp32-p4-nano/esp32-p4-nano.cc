@@ -20,8 +20,7 @@
 #include "esp_ldo_regulator.h"
 
 #include "esp_lcd_mipi_dsi.h"
-#include "esp_lcd_jd9365.h"
-#include "lcd_init_cmds.h"
+#include "esp_lcd_ota7290b.h"
 #include "config.h"
 
 #include <esp_log.h>
@@ -114,23 +113,6 @@ private:
     }
 
     void InitializeLCD() {
-        uint8_t chip_addr = 0x45;
-        uint8_t write_cmds[4][2] = {{0x95, 0x11}, {0x95, 0x17}, {0x96, 0x00}, {0x96, 0xFF}};
-        i2c_device_config_t i2c_dev_conf = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = chip_addr,
-            .scl_speed_hz = 100000,
-        };
-        i2c_master_dev_handle_t dev_handle = NULL;
-        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK)
-        {
-            for (uint8_t i = 0; i < 4; i++)
-            {
-                i2c_master_transmit(dev_handle, write_cmds[i], 2, 50);
-            }
-            i2c_master_bus_rm_device(dev_handle);
-        }
-
         bsp_enable_dsi_phy_power();
         esp_lcd_panel_io_handle_t io = NULL;
         esp_lcd_panel_handle_t disp_panel = NULL;
@@ -138,53 +120,36 @@ private:
         esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
         esp_lcd_dsi_bus_config_t bus_config = {
             .bus_id = 0,
-            .num_data_lanes = 2,
-            .lane_bit_rate_mbps = 1500,
+            .num_data_lanes = LCD_MIPI_DSI_LANE_NUM,
+            .lane_bit_rate_mbps = LCD_MIPI_DSI_LANE_BITRATE_MBPS,
         };
-        esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
+        ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus));
 
         ESP_LOGI(TAG, "Install MIPI DSI LCD control panel");
         // we use DBI interface to send LCD commands and parameters
-        esp_lcd_dbi_io_config_t dbi_config = JD9365_PANEL_IO_DBI_CONFIG();
-        esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io);
+        esp_lcd_dbi_io_config_t dbi_config = OTA7290B_PANEL_IO_DBI_CONFIG();
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io));
 
-        esp_lcd_dpi_panel_config_t dpi_config = {
-            .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
-            .dpi_clock_freq_mhz = 80,
-            .in_color_format = LCD_COLOR_FMT_RGB565,
-            .out_color_format = LCD_COLOR_FMT_RGB565,
-            .num_fbs = 1,
-            .video_timing = {
-                .h_size = 800,
-                .v_size = 1280,
-                .hsync_pulse_width = 20,
-                .hsync_back_porch = 20,
-                .hsync_front_porch = 40,
-                .vsync_pulse_width = 10,
-                .vsync_back_porch = 4,
-                .vsync_front_porch = 30,
-            },
-        };
+        esp_lcd_dpi_panel_config_t dpi_config =
+            OTA7290B_480_1920_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_FMT_RGB565);
+        dpi_config.num_fbs = 1;
 
-        jd9365_vendor_config_t vendor_config = {
-            .init_cmds = lcd_init_cmds,
-            .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
+        ota7290b_vendor_config_t vendor_config = {
             .mipi_config = {
                 .dsi_bus = mipi_dsi_bus,
                 .dpi_config = &dpi_config,
-                .lane_num = 2,
             },
         };
 
         const esp_lcd_panel_dev_config_t lcd_dev_config = {
             .reset_gpio_num = PIN_NUM_LCD_RST,
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-            .bits_per_pixel = 16,
+            .bits_per_pixel = LCD_BIT_PER_PIXEL,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
-        esp_lcd_panel_reset(disp_panel);
-        esp_lcd_panel_init(disp_panel);
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ota7290b(io, &lcd_dev_config, &disp_panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(disp_panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(disp_panel));
 
         display__ = new MipiLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                        DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);

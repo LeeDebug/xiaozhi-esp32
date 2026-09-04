@@ -1,6 +1,14 @@
 ## IDF Component Manager Manifest File
 dependencies:
   waveshare/esp_lcd_sh8601: 1.0.2
+  waveshare/esp_lcd_ota7290b:
+    version: '*'
+    rules:
+    - if: target in [esp32p4]
+  waveshare/esp32_p4_platform:
+    version: 2.0.1
+    rules:
+    - if: target in [esp32p4]
   espressif/esp_lcd_co5300: ^2.0.3
   espressif/esp_lcd_ili9341: ^2.0.2
   espressif/esp_lcd_gc9a01: ~2.0.4
