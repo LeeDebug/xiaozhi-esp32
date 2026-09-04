@@ -19,15 +19,21 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_ldo_regulator.h"
 
-#include "esp_lcd_mipi_dsi.h"
-#include "esp_lcd_jd9365.h"
-#include "lcd_init_cmds.h"
+#include "esp_lcd_ota7290b.h"
 #include "config.h"
+#include "lcd_init_cmds.h"
 
 #include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <driver/i2c_master.h>
 #include <esp_lvgl_port.h>
 #include "esp_lcd_touch_gt911.h"
+
+extern "C" {
+#include "bsp/esp32_p4_platform.h"
+}
+
 #define TAG "WaveshareEsp32p4nano"
 
 #if CONFIG_XIAOZHI_NETWORK_ETHERNET
@@ -36,41 +42,27 @@ using WaveshareEsp32p4nanoBase = EthernetBoard;
 using WaveshareEsp32p4nanoBase = WifiBoard;
 #endif
 
-class CustomBacklight : public Backlight {
+class I2cBacklight : public Backlight {
 public:
-    CustomBacklight(i2c_master_bus_handle_t i2c_handle)
-        : Backlight(), i2c_handle_(i2c_handle) {}
+    explicit I2cBacklight(i2c_master_bus_handle_t i2c_bus)
+        : i2c_bus_(i2c_bus) {}
 
 protected:
-    i2c_master_bus_handle_t i2c_handle_;
-
-    virtual void SetBrightnessImpl(uint8_t brightness) override {
-        uint8_t i2c_address = 0x45;     // 7-bit address
-        uint8_t reg = 0x96;
-        uint8_t data[2] = {reg, brightness};
-
-        i2c_master_dev_handle_t dev_handle;
-        i2c_device_config_t dev_cfg = {
+    void SetBrightnessImpl(uint8_t brightness) override {
+        i2c_master_dev_handle_t device = nullptr;
+        const i2c_device_config_t device_config = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = i2c_address,
+            .device_address = LCD_BACKLIGHT_I2C_ADDRESS,
             .scl_speed_hz = 100000,
         };
-
-        esp_err_t err = i2c_master_bus_add_device(i2c_handle_, &dev_cfg, &dev_handle);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to add I2C device: %s", esp_err_to_name(err));
-            return;
-        }
-
-        err = i2c_master_transmit(dev_handle, data, sizeof(data), -1);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to transmit brightness: %s", esp_err_to_name(err));
-        } else {
-            ESP_LOGI(TAG, "Backlight brightness set to %u", brightness);
-        }
-
-        // i2c_master_bus_rm_device(dev_handle);
+        ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus_, &device_config, &device));
+        const uint8_t payload[] = {LCD_BACKLIGHT_I2C_REGISTER, brightness};
+        ESP_ERROR_CHECK(i2c_master_transmit(device, payload, sizeof(payload), 100));
+        ESP_ERROR_CHECK(i2c_master_bus_rm_device(device));
     }
+
+private:
+    i2c_master_bus_handle_t i2c_bus_;
 };
 
 class WaveshareEsp32p4nano : public WaveshareEsp32p4nanoBase {
@@ -79,7 +71,7 @@ private:
     Button boot_button_;
     LcdDisplay *display__;
     EspVideo* camera_ = nullptr;
-    CustomBacklight *backlight_;
+    I2cBacklight *backlight_;
 
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
@@ -114,23 +106,6 @@ private:
     }
 
     void InitializeLCD() {
-        uint8_t chip_addr = 0x45;
-        uint8_t write_cmds[4][2] = {{0x95, 0x11}, {0x95, 0x17}, {0x96, 0x00}, {0x96, 0xFF}};
-        i2c_device_config_t i2c_dev_conf = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = chip_addr,
-            .scl_speed_hz = 100000,
-        };
-        i2c_master_dev_handle_t dev_handle = NULL;
-        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK)
-        {
-            for (uint8_t i = 0; i < 4; i++)
-            {
-                i2c_master_transmit(dev_handle, write_cmds[i], 2, 50);
-            }
-            i2c_master_bus_rm_device(dev_handle);
-        }
-
         bsp_enable_dsi_phy_power();
         esp_lcd_panel_io_handle_t io = NULL;
         esp_lcd_panel_handle_t disp_panel = NULL;
@@ -139,40 +114,48 @@ private:
         esp_lcd_dsi_bus_config_t bus_config = {
             .bus_id = 0,
             .num_data_lanes = 2,
-            .lane_bit_rate_mbps = 1500,
+            // The panel component's reference configuration uses 1300 Mbps.
+            // 1500 Mbps can make DBI reads hang when the panel link is marginal.
+            .lane_bit_rate_mbps = 1300,
         };
-        esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
+        ESP_ERROR_CHECK(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus));
 
         ESP_LOGI(TAG, "Install MIPI DSI LCD control panel");
-        // we use DBI interface to send LCD commands and parameters
-        esp_lcd_dbi_io_config_t dbi_config = JD9365_PANEL_IO_DBI_CONFIG();
-        esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io);
+        // The OTA7290B component expects 8-bit DCS command and parameter fields.
+        esp_lcd_dbi_io_config_t dbi_config = OTA7290B_PANEL_IO_DBI_CONFIG();
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io));
 
+        // Build the DPI configuration explicitly because the component macro uses
+        // a nested designated initializer that GCC rejects in C++ mode.
         esp_lcd_dpi_panel_config_t dpi_config = {
+            .virtual_channel = 0,
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
-            .dpi_clock_freq_mhz = 80,
+            .dpi_clock_freq_mhz = 75,
+            .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
             .in_color_format = LCD_COLOR_FMT_RGB565,
             .out_color_format = LCD_COLOR_FMT_RGB565,
             .num_fbs = 1,
             .video_timing = {
-                .h_size = 800,
-                .v_size = 1280,
-                .hsync_pulse_width = 20,
-                .hsync_back_porch = 20,
-                .hsync_front_porch = 40,
-                .vsync_pulse_width = 10,
-                .vsync_back_porch = 4,
-                .vsync_front_porch = 30,
+                .h_size = 480,
+                .v_size = 1920,
+                .hsync_pulse_width = 50,
+                .hsync_back_porch = 50,
+                .hsync_front_porch = 50,
+                .vsync_pulse_width = 20,
+                .vsync_back_porch = 20,
+                .vsync_front_porch = 20,
+            },
+            .flags = {
+                .use_dma2d = true,
             },
         };
 
-        jd9365_vendor_config_t vendor_config = {
+        ota7290b_vendor_config_t vendor_config = {
             .init_cmds = lcd_init_cmds,
             .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
             .mipi_config = {
                 .dsi_bus = mipi_dsi_bus,
                 .dpi_config = &dpi_config,
-                .lane_num = 2,
             },
         };
 
@@ -182,18 +165,21 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
-        esp_lcd_panel_reset(disp_panel);
-        esp_lcd_panel_init(disp_panel);
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ota7290b(io, &lcd_dev_config, &disp_panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(disp_panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(disp_panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(disp_panel, true));
 
         display__ = new MipiLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                        DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-        backlight_ = new CustomBacklight(codec_i2c_bus_);
+        backlight_ = new I2cBacklight(codec_i2c_bus_);
         backlight_->RestoreBrightness();
     }
     void InitializeTouch()
     {
-        esp_lcd_touch_handle_t tp;
+        // This panel uses GT9271, which is compatible with the GT911 driver.
+        // Probe both legal GT9xx addresses instead of creating a device blindly.
+        esp_lcd_touch_handle_t tp = nullptr;
         esp_lcd_touch_config_t tp_cfg = {
             .x_max = DISPLAY_WIDTH,
             .y_max = DISPLAY_HEIGHT,
@@ -204,24 +190,41 @@ private:
                 .interrupt = 0,
             },
             .flags = {
-                .swap_xy = 0,
-                .mirror_x = 0,
-                .mirror_y = 0,
+                .swap_xy = DISPLAY_SWAP_XY,
+                .mirror_x = DISPLAY_MIRROR_X,
+                .mirror_y = DISPLAY_MIRROR_Y,
             },
         };
-        esp_lcd_panel_io_handle_t tp_io_handle = NULL;
+        esp_lcd_panel_io_handle_t tp_io_handle = nullptr;
         esp_lcd_panel_io_i2c_config_t tp_io_config = {
-            .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, 
+            .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
             .control_phase_bytes = 1,
             .dc_bit_offset = 0,
-            .lcd_cmd_bits = 16,                            
-            .flags =
-            {
+            .lcd_cmd_bits = 16,
+            .lcd_param_bits = 8,
+            .flags = {
                 .disable_control_phase = 1,
+            },
+            .scl_speed_hz = 100 * 1000,
+        };
+
+        const uint8_t touch_addresses[] = {
+            ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
+            ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP,
+        };
+        esp_err_t touch_err = ESP_ERR_NOT_FOUND;
+        for (uint8_t address : touch_addresses) {
+            if (i2c_master_probe(codec_i2c_bus_, address, 100) != ESP_OK) {
+                continue;
             }
-	    };
-        tp_io_config.scl_speed_hz = 100 * 1000;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle));
+            tp_io_config.dev_addr = address;
+            touch_err = esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle);
+            if (touch_err == ESP_OK) {
+                ESP_LOGI(TAG, "GT9xx touch controller found at 0x%02X", address);
+                break;
+            }
+        }
+        ESP_ERROR_CHECK(touch_err);
         ESP_LOGI(TAG, "Initialize touch controller");
         ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &tp));
         const lvgl_port_touch_cfg_t touch_cfg = {

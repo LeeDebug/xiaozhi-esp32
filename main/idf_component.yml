@@ -79,8 +79,12 @@ dependencies:
     - if: target in [esp32s3]
 
   tny-robotics/sh1106-esp-idf: ^1.0.0
-  espressif/esp_lcd_jd9365:
-    version: '*'
+  waveshare/esp_lcd_ota7290b:
+    version: ^2.0.0
+    rules:
+    - if: target in [esp32p4]
+  waveshare/esp32_p4_platform:
+    version: ^2.0.1
     rules:
     - if: target in [esp32p4]
   waveshare/esp_lcd_hx8394:
@@ -89,10 +93,6 @@ dependencies:
     - if: target in [esp32p4]
   waveshare/esp_lcd_st7703:
     version: '*'
-    rules:
-    - if: target in [esp32p4]
-  espressif/esp_lcd_ili9881c:
-    version: ^1.0.1
     rules:
     - if: target in [esp32p4]
   espressif/esp_lcd_ek79007:

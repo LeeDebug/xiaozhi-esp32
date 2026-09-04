@@ -19,11 +19,20 @@
 
 #define BOOT_BUTTON_GPIO        GPIO_NUM_35
 
-#define DISPLAY_WIDTH 800
-#define DISPLAY_HEIGHT 1280
+#define DISPLAY_WIDTH 480
+#define DISPLAY_HEIGHT 1920
+
+// The panel is physically portrait; GT9271 reports the same orientation.
+#define TOUCH_WIDTH DISPLAY_WIDTH
+#define TOUCH_HEIGHT DISPLAY_HEIGHT
 
 #define LCD_BIT_PER_PIXEL          (16)
 #define PIN_NUM_LCD_RST            GPIO_NUM_NC
+
+#define LCD_BACKLIGHT_I2C_ADDRESS  0x45
+#define LCD_BACKLIGHT_I2C_REGISTER 0x96
+#define PIN_NUM_I2C_SDA            AUDIO_CODEC_I2C_SDA_PIN
+#define PIN_NUM_I2C_SCL            AUDIO_CODEC_I2C_SCL_PIN
 
 #define DELAY_TIME_MS                      (3000)
 #define LCD_MIPI_DSI_LANE_NUM          (2)    // 2 data lanes
@@ -37,8 +46,5 @@
 
 #define DISPLAY_OFFSET_X  0
 #define DISPLAY_OFFSET_Y  0
-
-#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_NC
-#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 #endif // _BOARD_CONFIG_H_
