@@ -6,7 +6,6 @@
 
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
-#include <atomic>
 #include <memory>
 
 #define PREVIEW_IMAGE_DURATION_MS 5000
@@ -22,7 +21,13 @@ protected:
     lv_obj_t* content_ = nullptr;
     lv_obj_t* container_ = nullptr;
     lv_obj_t* side_bar_ = nullptr;
+    lv_obj_t* left_panel_ = nullptr;
+    lv_obj_t* right_panel_ = nullptr;
+    lv_obj_t* press_to_talk_button_ = nullptr;
+    lv_obj_t* press_to_talk_label_ = nullptr;
     lv_obj_t* bottom_bar_ = nullptr;
+    lv_obj_t* brand_image_ = nullptr;
+    bool press_to_talk_active_ = false;
     lv_obj_t* preview_image_ = nullptr;
     lv_obj_t* emoji_label_ = nullptr;
     lv_obj_t* emoji_image_ = nullptr;
@@ -32,8 +37,10 @@ protected:
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
+    bool brand_image_loaded_ = false;
 
     void InitializeLcdThemes();
+    void LoadBrandImage();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
 

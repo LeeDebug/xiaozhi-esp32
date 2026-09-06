@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "board.h"
+#include "application.h"
+#include "assets.h"
 
 #define TAG "LcdDisplay"
 
@@ -339,6 +341,11 @@ LcdDisplay::~LcdDisplay() {
     if (container_ != nullptr) {
         lv_obj_del(container_);
     }
+    brand_image_ = nullptr;
+    left_panel_ = nullptr;
+    right_panel_ = nullptr;
+    press_to_talk_button_ = nullptr;
+    press_to_talk_label_ = nullptr;
     if (display_ != nullptr) {
         lv_display_delete(display_);
     }
@@ -460,15 +467,86 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
 
-    /* Content - Chat area */
-    content_ = lv_obj_create(container_);
+    /* Main area: left brand panel, center chat, right actions */
+    side_bar_ = lv_obj_create(container_);
+    lv_obj_set_width(side_bar_, LV_HOR_RES);
+    lv_obj_set_flex_grow(side_bar_, 1);
+    lv_obj_set_style_radius(side_bar_, 0, 0);
+    lv_obj_set_style_pad_all(side_bar_, 0, 0);
+    lv_obj_set_style_border_width(side_bar_, 0, 0);
+    lv_obj_set_style_bg_opa(side_bar_, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(side_bar_, LV_FLEX_FLOW_ROW);
+
+    auto panel_width = std::max<lv_coord_t>(LV_HOR_RES / 5, lvgl_theme->spacing(28));
+    left_panel_ = lv_obj_create(side_bar_);
+    lv_obj_set_width(left_panel_, panel_width);
+    lv_obj_set_height(left_panel_, LV_PCT(100));
+    lv_obj_set_style_bg_color(left_panel_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_bg_opa(left_panel_, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(left_panel_, 0, 0);
+    lv_obj_set_style_pad_all(left_panel_, lvgl_theme->spacing(4), 0);
+
+    brand_image_ = lv_image_create(left_panel_);
+    lv_obj_set_size(brand_image_, LV_PCT(100), LV_PCT(100));
+    lv_image_set_inner_align(brand_image_, LV_IMAGE_ALIGN_CENTER);
+    LoadBrandImage();
+
+    content_ = lv_obj_create(side_bar_);
     lv_obj_set_style_radius(content_, 0, 0);
-    lv_obj_set_width(content_, LV_HOR_RES);
     lv_obj_set_flex_grow(content_, 1);
     lv_obj_set_style_pad_all(content_, lvgl_theme->spacing(4), 0);
     lv_obj_set_style_border_width(content_, 0, 0);
-    lv_obj_set_style_bg_color(content_, lvgl_theme->chat_background_color(),
-                              0);  // Background for chat area
+    lv_obj_set_style_bg_color(content_, lvgl_theme->chat_background_color(), 0);
+
+    right_panel_ = lv_obj_create(side_bar_);
+    lv_obj_set_width(right_panel_, panel_width);
+    lv_obj_set_height(right_panel_, LV_PCT(100));
+    lv_obj_set_style_bg_color(right_panel_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_bg_opa(right_panel_, LV_OPA_20, 0);
+    lv_obj_set_style_border_width(right_panel_, 0, 0);
+    lv_obj_set_style_pad_all(right_panel_, lvgl_theme->spacing(4), 0);
+    lv_obj_set_flex_flow(right_panel_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(right_panel_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(right_panel_, LV_OBJ_FLAG_SCROLLABLE);
+
+    auto settings_button = lv_button_create(right_panel_);
+    lv_obj_set_size(settings_button, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_ext_click_area(settings_button, 10);
+    auto settings_label = lv_label_create(settings_button);
+    lv_obj_set_style_text_font(settings_label, large_icon_font, 0);
+    lv_label_set_text(settings_label, MATERIAL_SYMBOLS_SETTINGS);
+    lv_obj_center(settings_label);
+    lv_obj_add_event_cb(settings_button, [](lv_event_t* event) {
+        auto code = lv_event_get_code(event);
+        if (code == LV_EVENT_CLICKED || code == LV_EVENT_LONG_PRESSED) {
+            auto display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+            ESP_LOGI(TAG, "Settings button activated");
+            display->ShowNotification("跳转到设置页面");
+        }
+    }, LV_EVENT_CLICKED, this);
+
+    press_to_talk_button_ = lv_button_create(right_panel_);
+    lv_obj_set_size(press_to_talk_button_, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_ext_click_area(press_to_talk_button_, 10);
+    press_to_talk_label_ = lv_label_create(press_to_talk_button_);
+    lv_label_set_text(press_to_talk_label_, "按住说话");
+    lv_obj_center(press_to_talk_label_);
+    lv_obj_add_event_cb(press_to_talk_button_, [](lv_event_t* event) {
+        auto display = static_cast<LcdDisplay*>(lv_event_get_user_data(event));
+        auto code = lv_event_get_code(event);
+        if (code == LV_EVENT_PRESSED) {
+            ESP_LOGI(TAG, "Press-to-talk pressed");
+            display->press_to_talk_active_ = true;
+            lv_label_set_text(display->press_to_talk_label_, "松开停止");
+            Application::GetInstance().StartListening();
+        } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+            ESP_LOGI(TAG, "Press-to-talk released");
+            display->press_to_talk_active_ = false;
+            lv_label_set_text(display->press_to_talk_label_, "按住说话");
+            Application::GetInstance().StopListening();
+        }
+    }, LV_EVENT_ALL, this);
 
     // Enable scrolling for chat content
     lv_obj_set_scrollbar_mode(content_, LV_SCROLLBAR_MODE_OFF);
@@ -580,6 +658,13 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
 
+    // Chat area is narrower than the screen now, keep bubbles inside it
+    lv_obj_update_layout(content_);
+    lv_coord_t area_width = lv_obj_get_width(content_);
+    if (area_width <= 0) {
+        area_width = LV_HOR_RES;
+    }
+
     // Create a message bubble
     lv_obj_t* msg_bubble = lv_obj_create(content_);
     lv_obj_set_style_radius(msg_bubble, 8, 0);
@@ -592,7 +677,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_label_set_text(msg_text, content);
 
     // Calculate bubble width constraints
-    lv_coord_t max_width = LV_HOR_RES * 85 / 100 - 16;  // 85% of screen width
+    lv_coord_t max_width = area_width * 85 / 100 - 16;  // 85% of chat area width
     lv_coord_t min_width = 20;
 
     // Let LVGL calculate the natural text width first
@@ -671,7 +756,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (strcmp(role, "user") == 0) {
         // Create a full-width container
         lv_obj_t* container = lv_obj_create(content_);
-        lv_obj_set_width(container, LV_HOR_RES);
+        lv_obj_set_width(container, area_width);
         lv_obj_set_height(container, LV_SIZE_CONTENT);
 
         // Make container transparent and borderless
@@ -690,7 +775,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     } else if (strcmp(role, "system") == 0) {
         // Create full-width container for system messages to ensure center alignment
         lv_obj_t* container = lv_obj_create(content_);
-        lv_obj_set_width(container, LV_HOR_RES);
+        lv_obj_set_width(container, area_width);
         lv_obj_set_height(container, LV_SIZE_CONTENT);
 
         lv_obj_set_style_bg_opa(container, LV_OPA_TRANSP, 0);
@@ -742,7 +827,12 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     lv_obj_t* preview_image = lv_image_create(img_bubble);
 
     // Calculate appropriate size for the image
-    lv_coord_t max_width = LV_HOR_RES * 70 / 100;   // 70% of screen width
+    lv_obj_update_layout(content_);
+    lv_coord_t area_width = lv_obj_get_width(content_);
+    if (area_width <= 0) {
+        area_width = LV_HOR_RES;
+    }
+    lv_coord_t max_width = area_width * 70 / 100;   // 70% of chat area width
     lv_coord_t max_height = LV_VER_RES * 50 / 100;  // 50% of screen height
 
     // Calculate zoom factor to fit within maximum dimensions
@@ -1100,6 +1190,45 @@ void LcdDisplay::ClearChatMessages() {
 }
 #endif
 
+void LcdDisplay::LoadBrandImage() {
+    // Must be called with the display lock already held (SetupUI/SetTheme)
+    if (brand_image_ == nullptr || brand_image_loaded_) {
+        return;
+    }
+    void* brand_data = nullptr;
+    size_t brand_size = 0;
+    if (!Assets::GetInstance().GetAssetData("big-herdsman-logo.png", brand_data, brand_size)) {
+        return;
+    }
+
+    auto* brand_descriptor = new LvglAssetImage(brand_data, brand_size);
+    const lv_image_dsc_t* dsc = brand_descriptor->image_dsc();
+    lv_image_set_src(brand_image_, dsc);
+
+    if (dsc->header.w > 0 && dsc->header.h > 0) {
+        lv_obj_update_layout(left_panel_);
+        lv_coord_t avail_w = lv_obj_get_content_width(left_panel_);
+        lv_coord_t avail_h = lv_obj_get_content_height(left_panel_);
+        lv_coord_t scale = 256;
+        if (avail_w > 0) {
+            scale = std::min<lv_coord_t>(scale, avail_w * 256 / dsc->header.w);
+        }
+        if (avail_h > 0) {
+            scale = std::min<lv_coord_t>(scale, avail_h * 256 / dsc->header.h);
+        }
+        lv_image_set_scale(brand_image_, scale);
+    }
+
+    lv_obj_add_event_cb(
+        brand_image_,
+        [](lv_event_t* event) {
+            delete static_cast<LvglImage*>(lv_event_get_user_data(event));
+        },
+        LV_EVENT_DELETE, brand_descriptor);
+    brand_image_loaded_ = true;
+    ESP_LOGI(TAG, "Brand image loaded (%ux%u)", (unsigned)dsc->header.w, (unsigned)dsc->header.h);
+}
+
 void LcdDisplay::SetEmotion(const char* emotion) {
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!",
@@ -1327,6 +1456,9 @@ void LcdDisplay::SetTheme(Theme* theme) {
 
     // Update low battery popup
     lv_obj_set_style_bg_color(low_battery_popup_, lvgl_theme->low_battery_color(), 0);
+
+    // Assets may have been applied after SetupUI, try loading the brand logo now
+    LoadBrandImage();
 
     // No errors occurred. Save theme to settings
     Display::SetTheme(lvgl_theme);
