@@ -287,6 +287,9 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
+
+    // Set the display rotation to 90 degrees
+    lv_display_set_rotation(display_, LV_DISPLAY_ROTATION_90);
 }
 
 LcdDisplay::~LcdDisplay() {
