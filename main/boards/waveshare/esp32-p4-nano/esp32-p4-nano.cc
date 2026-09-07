@@ -20,8 +20,7 @@
 #include "esp_ldo_regulator.h"
 
 #include "esp_lcd_mipi_dsi.h"
-#include "esp_lcd_jd9365.h"
-#include "lcd_init_cmds.h"
+#include <esp_lcd_ota7290b.h>
 #include "config.h"
 
 #include <esp_log.h>
@@ -139,40 +138,42 @@ private:
         esp_lcd_dsi_bus_config_t bus_config = {
             .bus_id = 0,
             .num_data_lanes = 2,
-            .lane_bit_rate_mbps = 1500,
+            // Let ESP-IDF select the correct default for the configured P4 revision.
+            .phy_clk_src = static_cast<mipi_dsi_phy_clock_source_t>(0),
+            .lane_bit_rate_mbps = 1300,
         };
         esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
 
         ESP_LOGI(TAG, "Install MIPI DSI LCD control panel");
         // we use DBI interface to send LCD commands and parameters
-        esp_lcd_dbi_io_config_t dbi_config = JD9365_PANEL_IO_DBI_CONFIG();
+        esp_lcd_dbi_io_config_t dbi_config = OTA7290B_PANEL_IO_DBI_CONFIG();
         esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io);
 
         esp_lcd_dpi_panel_config_t dpi_config = {
+            .virtual_channel = 0,
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
-            .dpi_clock_freq_mhz = 80,
-            .in_color_format = LCD_COLOR_FMT_RGB565,
-            .out_color_format = LCD_COLOR_FMT_RGB565,
+            .dpi_clock_freq_mhz = 75,
+            .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
             .num_fbs = 1,
             .video_timing = {
-                .h_size = 800,
-                .v_size = 1280,
-                .hsync_pulse_width = 20,
-                .hsync_back_porch = 20,
-                .hsync_front_porch = 40,
-                .vsync_pulse_width = 10,
-                .vsync_back_porch = 4,
-                .vsync_front_porch = 30,
+                .h_size = 480,
+                .v_size = 1920,
+                .hsync_pulse_width = 50,
+                .hsync_back_porch = 50,
+                .hsync_front_porch = 50,
+                .vsync_pulse_width = 20,
+                .vsync_back_porch = 20,
+                .vsync_front_porch = 20,
+            },
+            .flags = {
+                .use_dma2d = true,
             },
         };
 
-        jd9365_vendor_config_t vendor_config = {
-            .init_cmds = lcd_init_cmds,
-            .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
+        ota7290b_vendor_config_t vendor_config = {
             .mipi_config = {
                 .dsi_bus = mipi_dsi_bus,
                 .dpi_config = &dpi_config,
-                .lane_num = 2,
             },
         };
 
@@ -182,8 +183,8 @@ private:
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
         };
-        esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
-        esp_lcd_panel_reset(disp_panel);
+        esp_lcd_new_panel_ota7290b(io, &lcd_dev_config, &disp_panel);
+        //esp_lcd_panel_reset(disp_panel);
         esp_lcd_panel_init(disp_panel);
 
         display__ = new MipiLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,

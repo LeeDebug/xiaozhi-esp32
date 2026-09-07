@@ -149,3 +149,5 @@ dependencies:
     - if: target in [esp32p4]
   m5stack/m5ioe1: ^1.0.8
   m5stack/m5pm1: ^1.0.5
+  waveshare/esp_lcd_ota7290b:
+    version: "^2.0.0"
