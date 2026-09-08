@@ -153,7 +153,14 @@ private:
             .virtual_channel = 0,
             .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
             .dpi_clock_freq_mhz = 75,
-            .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+            .in_color_format = LCD_COLOR_FMT_RGB565,
+            .out_color_format = LCD_COLOR_FMT_RGB565,
+#else
+            .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,  // RGB565 for 16 bits_per_pixel
+            .in_color_format = LCD_COLOR_FMT_RGB565,
+            .out_color_format = LCD_COLOR_FMT_RGB565,
+#endif
             .num_fbs = 1,
             .video_timing = {
                 .h_size = 480,
@@ -165,9 +172,11 @@ private:
                 .vsync_back_porch = 20,
                 .vsync_front_porch = 20,
             },
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
             .flags = {
                 .use_dma2d = true,
             },
+#endif
         };
 
         ota7290b_vendor_config_t vendor_config = {
@@ -177,13 +186,16 @@ private:
             },
         };
 
-        const esp_lcd_panel_dev_config_t lcd_dev_config = {
-            .reset_gpio_num = PIN_NUM_LCD_RST,
-            .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-            .bits_per_pixel = 16,
-            .vendor_config = &vendor_config,
-        };
+        esp_lcd_panel_dev_config_t lcd_dev_config = {};
+        lcd_dev_config.reset_gpio_num = PIN_NUM_LCD_RST;
+        lcd_dev_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        lcd_dev_config.bits_per_pixel = 16;
+        lcd_dev_config.vendor_config = &vendor_config;
+
         esp_lcd_new_panel_ota7290b(io, &lcd_dev_config, &disp_panel);
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+        //ESP_ERROR_CHECK(esp_lcd_dpi_panel_enable_dma2d(disp_panel));
+#endif
         //esp_lcd_panel_reset(disp_panel);
         esp_lcd_panel_init(disp_panel);
 
