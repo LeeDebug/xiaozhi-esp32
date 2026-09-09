@@ -868,6 +868,8 @@ endif()
 file(GLOB BOARD_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_DIR}/*.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_DIR}/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_DIR}/assets/*.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_DIR}/assets/*.c
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
