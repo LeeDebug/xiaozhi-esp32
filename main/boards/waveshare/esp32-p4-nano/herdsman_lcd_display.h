@@ -18,8 +18,10 @@ public:
 
 private:
     static constexpr int kTopBarHeight = 72;
-    static constexpr int kCenterWidth = 800;
-    static constexpr int kSideWidth = 560;
+    static constexpr int kCenterWidth = 1000;
+    static constexpr int kSideWidth = 460;
+    static constexpr int kChatBubbleWidth = 780;
+    static constexpr int kSystemBubbleWidth = 850;
 
     lv_obj_t* chat_list_ = nullptr;
     lv_obj_t* standby_panel_ = nullptr;

@@ -261,13 +261,14 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     lv_obj_center(logo);
 
     content_ = lv_obj_create(parent);
-    lv_obj_set_pos(content_, kSideWidth, kTopBarHeight + 16);
-    lv_obj_set_size(content_, kCenterWidth, LV_VER_RES - kTopBarHeight - 16);
-    MakePlain(content_);
+    lv_obj_set_pos(content_, kSideWidth, kTopBarHeight + 24);
+    lv_obj_set_size(content_, kCenterWidth, LV_VER_RES - kTopBarHeight - 40);
+    StyleCard(content_, 24);
+    lv_obj_set_style_pad_all(content_, 0, 0);
     lv_obj_clear_flag(content_, LV_OBJ_FLAG_SCROLLABLE);
 
     chat_list_ = lv_obj_create(content_);
-    lv_obj_set_size(chat_list_, kCenterWidth, LV_PCT(100));
+    lv_obj_set_size(chat_list_, LV_PCT(100), LV_PCT(100));
     MakePlain(chat_list_);
     lv_obj_set_scroll_dir(chat_list_, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(chat_list_, LV_SCROLLBAR_MODE_AUTO);
@@ -301,9 +302,13 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
 
 void HerdsmanLcdDisplay::CreateStandbyPanel() {
     standby_panel_ = lv_obj_create(content_);
-    lv_obj_set_size(standby_panel_, 720, 330);
-    lv_obj_center(standby_panel_);
-    StyleCard(standby_panel_, 22);
+    lv_obj_set_size(standby_panel_, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(standby_panel_, 0, 0);
+    lv_obj_set_style_bg_color(standby_panel_, lv_color_hex(kCardBackground), 0);
+    lv_obj_set_style_bg_opa(standby_panel_, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(standby_panel_, 0, 0);
+    lv_obj_set_style_radius(standby_panel_, 24, 0);
+    lv_obj_set_style_shadow_width(standby_panel_, 0, 0);
     lv_obj_set_style_pad_all(standby_panel_, 20, 0);
     lv_obj_clear_flag(standby_panel_, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -340,7 +345,7 @@ void HerdsmanLcdDisplay::CreateStandbyPanel() {
         lv_obj_set_style_text_color(bullet, lv_color_hex(kOrange), 0);
         lv_label_set_text(bullet, "•");
         lv_obj_t* text = lv_label_create(row);
-        lv_obj_set_width(text, 620);
+        lv_obj_set_width(text, 760);
         lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
         lv_label_set_text(text, question);
     }
@@ -552,7 +557,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     }
 
     lv_obj_t* bubble = lv_obj_create(row);
-    lv_obj_set_width(bubble, (is_user || is_assistant) ? 620 : 680);
+    lv_obj_set_width(bubble, (is_user || is_assistant) ? kChatBubbleWidth : kSystemBubbleWidth);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(bubble, 18, 0);
     lv_obj_set_style_border_width(bubble, 0, 0);
@@ -564,7 +569,8 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* text = lv_label_create(bubble);
-    lv_obj_set_width(text, (is_user || is_assistant) ? 592 : 652);
+    lv_obj_set_width(text,
+                     (is_user || is_assistant) ? kChatBubbleWidth - 28 : kSystemBubbleWidth - 28);
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(text, lv_color_hex(kDarkText), 0);
     lv_label_set_text(text, content);
