@@ -7,6 +7,7 @@
 #include "display/lvgl_display/lvgl_theme.h"
 
 #include <material_symbols.h>
+#include <wifi_manager.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -16,6 +17,8 @@
 extern "C" {
 LV_IMAGE_DECLARE(herdsman_logo);
 }
+
+LV_FONT_DECLARE(font_herdsman_ui_30_4);
 
 namespace {
 
@@ -47,8 +50,8 @@ void StyleCard(lv_obj_t* object, int radius) {
 }
 
 lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* text,
-                               const lv_font_t* icon_font, bool filled, lv_event_cb_t callback,
-                               void* user_data) {
+                               const lv_font_t* text_font, const lv_font_t* icon_font, bool filled,
+                               lv_event_cb_t callback, void* user_data) {
     lv_obj_t* button = lv_button_create(parent);
     lv_obj_set_size(button, 310, filled ? 90 : 82);
     lv_obj_set_style_radius(button, 20, 0);
@@ -73,6 +76,7 @@ lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* t
     lv_label_set_text(icon_label, icon);
 
     lv_obj_t* text_label = lv_label_create(button);
+    lv_obj_set_style_text_font(text_label, text_font, 0);
     lv_obj_set_style_text_color(text_label, filled ? lv_color_white() : lv_color_hex(kDarkText), 0);
     lv_label_set_text(text_label, text);
     return button;
@@ -146,6 +150,7 @@ void HerdsmanLcdDisplay::SetupUI() {
 
     auto* theme = static_cast<LvglTheme*>(current_theme_);
     const lv_font_t* text_font = theme->text_font()->font();
+    theme->text_font()->SetFallback(&font_herdsman_ui_30_4);
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(kDarkText), 0);
@@ -176,7 +181,11 @@ void HerdsmanLcdDisplay::SetupUI() {
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 
+    UpdateDateTime();
+    UpdateSignalStrength();
     UpdateHomeState();
+    lv_obj_update_layout(screen);
+    lv_obj_invalidate(screen);
 }
 
 void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
@@ -197,7 +206,7 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_align(network_label_, LV_ALIGN_LEFT_MID, 30, 0);
 
     status_bar_ = lv_obj_create(top_bar_);
-    lv_obj_set_size(status_bar_, 1050, kTopBarHeight);
+    lv_obj_set_size(status_bar_, 900, kTopBarHeight);
     MakePlain(status_bar_);
     lv_obj_center(status_bar_);
 
@@ -221,17 +230,25 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, lv_color_hex(0x3F4C5B), 0);
     lv_label_set_text(mute_label_, "");
-    lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -82, 0);
+    lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -510, 0);
 
     battery_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lv_color_hex(0x3F4C5B), 0);
     lv_label_set_text(battery_label_, "");
-    lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -28, 0);
+    lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -458, 0);
+
+    date_time_label_ = lv_label_create(top_bar_);
+    lv_obj_set_width(date_time_label_, 420);
+    lv_obj_set_style_text_align(date_time_label_, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_color(date_time_label_, lv_color_hex(kMutedText), 0);
+    lv_label_set_text(date_time_label_, "----/--/-- --:--:--");
+    lv_obj_align(date_time_label_, LV_ALIGN_RIGHT_MID, -24, 0);
 }
 
 void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     auto* theme = static_cast<LvglTheme*>(current_theme_);
+    const lv_font_t* text_font = theme->text_font()->font();
     const lv_font_t* icon_font = theme->large_icon_font()->font();
 
     lv_obj_t* left_panel = lv_obj_create(parent);
@@ -269,12 +286,14 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     lv_obj_clear_flag(right_panel, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* settings_button =
-        CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_SETTINGS, "前往设置", icon_font, false,
-                             SettingsButtonEvent, this);
+        CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_SETTINGS, "前往设置", text_font,
+                             icon_font, false, SettingsButtonEvent, this);
     lv_obj_align(settings_button, LV_ALIGN_CENTER, 0, -62);
+    settings_button_icon_ = lv_obj_get_child(settings_button, 0);
+    settings_button_label_ = lv_obj_get_child(settings_button, 1);
 
     lv_obj_t* chat_button = CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_MIC, "开始对话",
-                                                 icon_font, true, ChatButtonEvent, this);
+                                                 text_font, icon_font, true, ChatButtonEvent, this);
     lv_obj_align(chat_button, LV_ALIGN_CENTER, 0, 66);
     chat_button_icon_ = lv_obj_get_child(chat_button, 0);
     chat_button_label_ = lv_obj_get_child(chat_button, 1);
@@ -378,7 +397,7 @@ void HerdsmanLcdDisplay::CreateSettingsPanel(lv_obj_t* parent) {
     settings_time_label_ = CreateSettingsValue(row, "--");
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_WIFI, "信号", icon_font);
-    CreateSettingsValue(row, "强（满格）");
+    signal_value_label_ = CreateSettingsValue(row, "弱（0%）");
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_BRIGHTNESS_6, "亮度", icon_font);
     lv_obj_t* brightness_slider = lv_slider_create(row);
@@ -426,11 +445,32 @@ void HerdsmanLcdDisplay::SetTheme(Theme* theme) {
     DisplayLockGuard lock(this);
     auto* lvgl_theme = static_cast<LvglTheme*>(theme);
     lv_obj_t* screen = lv_screen_active();
+    const lv_font_t* text_font = nullptr;
     if (screen != nullptr && lvgl_theme->text_font() != nullptr &&
         lvgl_theme->text_font()->font() != nullptr) {
-        // Text font is inherited by the board-specific UI. Icon labels have an explicit icon font
-        // and therefore remain unchanged when an asset bundle replaces the text font.
-        lv_obj_set_style_text_font(screen, lvgl_theme->text_font()->font(), 0);
+        text_font = lvgl_theme->text_font()->font();
+        lv_obj_set_style_text_font(screen, text_font, 0);
+        if (settings_button_label_ != nullptr) {
+            lv_obj_set_style_text_font(settings_button_label_, text_font, 0);
+        }
+        if (chat_button_label_ != nullptr) {
+            lv_obj_set_style_text_font(chat_button_label_, text_font, 0);
+        }
+    }
+
+    const lv_font_t* icon_font =
+        lvgl_theme->large_icon_font() != nullptr ? lvgl_theme->large_icon_font()->font() : nullptr;
+    if (icon_font != nullptr) {
+        if (settings_button_icon_ != nullptr) {
+            lv_obj_set_style_text_font(settings_button_icon_, icon_font, 0);
+        }
+        if (chat_button_icon_ != nullptr) {
+            lv_obj_set_style_text_font(chat_button_icon_, icon_font, 0);
+        }
+    }
+    if (screen != nullptr) {
+        lv_obj_update_layout(screen);
+        lv_obj_invalidate(screen);
     }
 
     // The Herdsman interface deliberately keeps its fixed light brand palette for both saved
@@ -452,6 +492,14 @@ void HerdsmanLcdDisplay::SetStatus(const char* status) {
 
     DisplayLockGuard lock(this);
     UpdateHomeState();
+}
+
+void HerdsmanLcdDisplay::UpdateStatusBar(bool update_all) {
+    LvglDisplay::UpdateStatusBar(update_all);
+
+    DisplayLockGuard lock(this);
+    UpdateDateTime();
+    UpdateSignalStrength();
 }
 
 void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
@@ -547,6 +595,13 @@ void HerdsmanLcdDisplay::UpdateHomeState() {
     const auto state = Application::GetInstance().GetDeviceState();
     if (state == kDeviceStateIdle) {
         lv_obj_remove_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    const bool chat_active = state == kDeviceStateConnecting || state == kDeviceStateListening ||
+                             state == kDeviceStateSpeaking;
+    if (!chat_active) {
         if (chat_button_label_ != nullptr) {
             lv_label_set_text(chat_button_label_, "开始对话");
         }
@@ -554,7 +609,6 @@ void HerdsmanLcdDisplay::UpdateHomeState() {
             lv_label_set_text(chat_button_icon_, MATERIAL_SYMBOLS_MIC);
         }
     } else {
-        lv_obj_add_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
         if (chat_button_label_ != nullptr) {
             lv_label_set_text(chat_button_label_, "结束对话");
         }
@@ -562,6 +616,43 @@ void HerdsmanLcdDisplay::UpdateHomeState() {
             lv_label_set_text(chat_button_icon_, MATERIAL_SYMBOLS_STOP);
         }
     }
+}
+
+void HerdsmanLcdDisplay::UpdateDateTime() {
+    if (date_time_label_ == nullptr) {
+        return;
+    }
+
+    const std::time_t now = std::time(nullptr);
+    const std::tm* local_time = std::localtime(&now);
+    if (local_time == nullptr || local_time->tm_year < 125) {
+        lv_label_set_text(date_time_label_, "----/--/-- --:--:--");
+        return;
+    }
+
+    char time_text[32];
+    std::strftime(time_text, sizeof(time_text), "%Y-%m-%d %H:%M:%S", local_time);
+    lv_label_set_text(date_time_label_, time_text);
+}
+
+void HerdsmanLcdDisplay::UpdateSignalStrength() {
+    if (signal_value_label_ == nullptr) {
+        return;
+    }
+
+    auto& wifi = WifiManager::GetInstance();
+    int percent = 0;
+    if (wifi.IsConnected()) {
+        const int rssi = wifi.GetRssi();
+        if (rssi < 0) {
+            percent = std::clamp((rssi + 100) * 2, 0, 100);
+        }
+    }
+
+    const char* level = percent >= 70 ? "强" : (percent >= 40 ? "中" : "弱");
+    char signal_text[32];
+    std::snprintf(signal_text, sizeof(signal_text), "%s（%d%%）", level, percent);
+    lv_label_set_text(signal_value_label_, signal_text);
 }
 
 void HerdsmanLcdDisplay::UpdateSettingsTime() {
@@ -585,6 +676,7 @@ void HerdsmanLcdDisplay::ShowSettings(bool show) {
     }
     if (show) {
         UpdateSettingsTime();
+        UpdateSignalStrength();
         lv_obj_remove_flag(settings_panel_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(settings_panel_);
     } else {

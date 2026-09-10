@@ -11,6 +11,7 @@ public:
     void SetupUI() override;
     void SetTheme(Theme* theme) override;
     void SetStatus(const char* status) override;
+    void UpdateStatusBar(bool update_all = false) override;
     void SetChatMessage(const char* role, const char* content) override;
     void ClearChatMessages() override;
     void SetEmotion(const char* emotion) override;
@@ -24,6 +25,10 @@ private:
     lv_obj_t* standby_panel_ = nullptr;
     lv_obj_t* settings_panel_ = nullptr;
     lv_obj_t* settings_time_label_ = nullptr;
+    lv_obj_t* signal_value_label_ = nullptr;
+    lv_obj_t* date_time_label_ = nullptr;
+    lv_obj_t* settings_button_label_ = nullptr;
+    lv_obj_t* settings_button_icon_ = nullptr;
     lv_obj_t* chat_button_label_ = nullptr;
     lv_obj_t* chat_button_icon_ = nullptr;
     lv_obj_t* brightness_value_label_ = nullptr;
@@ -34,6 +39,8 @@ private:
     void CreateStandbyPanel();
     void CreateSettingsPanel(lv_obj_t* parent);
     void UpdateHomeState();
+    void UpdateDateTime();
+    void UpdateSignalStrength();
     void UpdateSettingsTime();
     void ShowSettings(bool show);
 
