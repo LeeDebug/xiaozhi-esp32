@@ -402,17 +402,17 @@ void HerdsmanLcdDisplay::CreateSettingsPanel(lv_obj_t* parent) {
     settings_time_label_ = CreateSettingsValue(row, "--");
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_WIFI, "信号", icon_font);
-    signal_value_label_ = CreateSettingsValue(row, "弱（0%）");
+    signal_value_label_ = CreateSettingsValue(row, "-- dBm");
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_BRIGHTNESS_6, "亮度", icon_font);
-    lv_obj_t* brightness_slider = lv_slider_create(row);
-    StyleSlider(brightness_slider);
-    lv_slider_set_range(brightness_slider, 10, 100);
+    brightness_slider_ = lv_slider_create(row);
+    StyleSlider(brightness_slider_);
+    lv_slider_set_range(brightness_slider_, 10, 100);
     auto* backlight = Board::GetInstance().GetBacklight();
     int brightness = backlight == nullptr ? 75 : backlight->brightness();
-    lv_slider_set_value(brightness_slider, std::max(10, brightness), LV_ANIM_OFF);
-    lv_obj_align(brightness_slider, LV_ALIGN_RIGHT_MID, -132, 0);
-    lv_obj_add_event_cb(brightness_slider, BrightnessSliderEvent, LV_EVENT_ALL, this);
+    lv_slider_set_value(brightness_slider_, std::max(10, brightness), LV_ANIM_OFF);
+    lv_obj_align(brightness_slider_, LV_ALIGN_RIGHT_MID, -132, 0);
+    lv_obj_add_event_cb(brightness_slider_, BrightnessSliderEvent, LV_EVENT_ALL, this);
     brightness_value_label_ = CreateSettingsValue(row, "");
     lv_obj_set_width(brightness_value_label_, 90);
     char value[12];
@@ -420,13 +420,13 @@ void HerdsmanLcdDisplay::CreateSettingsPanel(lv_obj_t* parent) {
     lv_label_set_text(brightness_value_label_, value);
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_VOLUME_UP, "音量", icon_font);
-    lv_obj_t* volume_slider = lv_slider_create(row);
-    StyleSlider(volume_slider);
-    lv_slider_set_range(volume_slider, 0, 100);
+    volume_slider_ = lv_slider_create(row);
+    StyleSlider(volume_slider_);
+    lv_slider_set_range(volume_slider_, 0, 100);
     int volume = Board::GetInstance().GetAudioCodec()->output_volume();
-    lv_slider_set_value(volume_slider, volume, LV_ANIM_OFF);
-    lv_obj_align(volume_slider, LV_ALIGN_RIGHT_MID, -132, 0);
-    lv_obj_add_event_cb(volume_slider, VolumeSliderEvent, LV_EVENT_ALL, this);
+    lv_slider_set_value(volume_slider_, volume, LV_ANIM_OFF);
+    lv_obj_align(volume_slider_, LV_ALIGN_RIGHT_MID, -132, 0);
+    lv_obj_add_event_cb(volume_slider_, VolumeSliderEvent, LV_EVENT_ALL, this);
     volume_value_label_ = CreateSettingsValue(row, "");
     lv_obj_set_width(volume_value_label_, 90);
     std::snprintf(value, sizeof(value), "%d%%", volume);
@@ -647,17 +647,15 @@ void HerdsmanLcdDisplay::UpdateSignalStrength() {
     }
 
     auto& wifi = WifiManager::GetInstance();
-    int percent = 0;
-    if (wifi.IsConnected()) {
-        const int rssi = wifi.GetRssi();
-        if (rssi < 0) {
-            percent = std::clamp((rssi + 100) * 2, 0, 100);
-        }
+    if (!wifi.IsConnected()) {
+        lv_label_set_text(signal_value_label_, "-- dBm");
+        return;
     }
 
-    const char* level = percent >= 70 ? "强" : (percent >= 40 ? "中" : "弱");
+    const int rssi = wifi.GetRssi();
+    const char* level = rssi >= -65 ? "强" : (rssi >= -75 ? "中" : "弱");
     char signal_text[32];
-    std::snprintf(signal_text, sizeof(signal_text), "%s（%d%%）", level, percent);
+    std::snprintf(signal_text, sizeof(signal_text), "%s（%d dBm）", level, rssi);
     lv_label_set_text(signal_value_label_, signal_text);
 }
 
@@ -676,6 +674,27 @@ void HerdsmanLcdDisplay::UpdateSettingsTime() {
     lv_label_set_text(settings_time_label_, time_text);
 }
 
+void HerdsmanLcdDisplay::UpdateSettingsValues() {
+    auto* backlight = Board::GetInstance().GetBacklight();
+    if (backlight != nullptr && brightness_slider_ != nullptr &&
+        brightness_value_label_ != nullptr) {
+        const int brightness = std::max(10, static_cast<int>(backlight->brightness()));
+        lv_slider_set_value(brightness_slider_, brightness, LV_ANIM_OFF);
+        char brightness_text[12];
+        std::snprintf(brightness_text, sizeof(brightness_text), "%d%%", brightness);
+        lv_label_set_text(brightness_value_label_, brightness_text);
+    }
+
+    auto* codec = Board::GetInstance().GetAudioCodec();
+    if (codec != nullptr && volume_slider_ != nullptr && volume_value_label_ != nullptr) {
+        const int volume = codec->output_volume();
+        lv_slider_set_value(volume_slider_, volume, LV_ANIM_OFF);
+        char volume_text[12];
+        std::snprintf(volume_text, sizeof(volume_text), "%d%%", volume);
+        lv_label_set_text(volume_value_label_, volume_text);
+    }
+}
+
 void HerdsmanLcdDisplay::ShowSettings(bool show) {
     if (settings_panel_ == nullptr) {
         return;
@@ -683,6 +702,7 @@ void HerdsmanLcdDisplay::ShowSettings(bool show) {
     if (show) {
         UpdateSettingsTime();
         UpdateSignalStrength();
+        UpdateSettingsValues();
         lv_obj_remove_flag(settings_panel_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(settings_panel_);
     } else {
@@ -717,6 +737,7 @@ void HerdsmanLcdDisplay::BrightnessSliderEvent(lv_event_t* event) {
         Application::GetInstance().Schedule([value]() {
             auto* backlight = Board::GetInstance().GetBacklight();
             if (backlight != nullptr) {
+                // permanent=true persists to the existing display/brightness NVS key.
                 backlight->SetBrightness(value, true);
             }
         });
@@ -732,7 +753,9 @@ void HerdsmanLcdDisplay::VolumeSliderEvent(lv_event_t* event) {
         std::snprintf(text, sizeof(text), "%d%%", value);
         lv_label_set_text(self->volume_value_label_, text);
     } else if (lv_event_get_code(event) == LV_EVENT_RELEASED) {
-        Application::GetInstance().Schedule(
-            [value]() { Board::GetInstance().GetAudioCodec()->SetOutputVolume(value); });
+        Application::GetInstance().Schedule([value]() {
+            // AudioCodec persists to the existing audio/output_volume NVS key.
+            Board::GetInstance().GetAudioCodec()->SetOutputVolume(value);
+        });
     }
 }

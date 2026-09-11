@@ -33,6 +33,8 @@ private:
     lv_obj_t* settings_button_icon_ = nullptr;
     lv_obj_t* chat_button_label_ = nullptr;
     lv_obj_t* chat_button_icon_ = nullptr;
+    lv_obj_t* brightness_slider_ = nullptr;
+    lv_obj_t* volume_slider_ = nullptr;
     lv_obj_t* brightness_value_label_ = nullptr;
     lv_obj_t* volume_value_label_ = nullptr;
 
@@ -44,6 +46,7 @@ private:
     void UpdateDateTime();
     void UpdateSignalStrength();
     void UpdateSettingsTime();
+    void UpdateSettingsValues();
     void ShowSettings(bool show);
 
     static void SettingsButtonEvent(lv_event_t* event);
