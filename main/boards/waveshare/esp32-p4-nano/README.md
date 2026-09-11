@@ -3,6 +3,20 @@
 
 [ESP32-P4-NANO](https://www.waveshare.com/esp32-p4-nano.htm) is a small size and highly integrated development board designed by waveshare electronics based on ESP32-P4 chip
 
+## Production-monitoring Modbus
+
+This board starts an RTU master on UART1 (TX GPIO21, RX GPIO22) at 9600 baud, 8 data bits, no parity, and 1 stop bit. The attached production-monitor protocol is cached as four holding-register ranges:
+
+- Alarm registers 78-102 are read every second.
+- Water-control registers 0x67-0x68 are read every second; reserved register 0x69 is skipped.
+- General registers 0-77 and system/control registers 106-166 are read every five cycles.
+- MCP tool `self.production.main_water_valve.set` opens/closes the valve through register 0x67, and `self.production.water_temperature.get` returns the cached register 0x68 value as Celsius using a 0.001 scale.
+- Valve writes use protocol value 1 for open and 2 for closed.
+
+The device address defaults to 0, which means not configured; Modbus polling and writes are disabled until `ProductionModbus::SetDeviceAddress(1..247)` is called. Cached values are available through `GetCachedRegister()` and `GetSnapshot()`. Device writes use `WriteHoldingRegister()` and are serialized with polling by a shared bus mutex.
+
+Only TX and RX are configured. The external RS485 transceiver must provide automatic direction control. If the hardware instead requires a DE/RE signal, add its GPIO and switch the UART to RS485 half-duplex mode.
+
 
 
 ## Display Page

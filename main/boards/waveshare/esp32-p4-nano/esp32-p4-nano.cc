@@ -9,6 +9,8 @@
 #include "application.h"
 #include "herdsman_lcd_display.h"
 // #include "display/no_display.h"
+#include "production_mcp_tools.h"
+#include "production_modbus.h"
 #include "button.h"
 
 #include "esp_video.h"
@@ -288,6 +290,12 @@ public:
         InitializeTouch();
         InitializeCamera();
         InitializeButtons();
+
+        esp_err_t modbus_err = ProductionModbus::GetInstance().Start();
+        if (modbus_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start production Modbus: %s", esp_err_to_name(modbus_err));
+        }
+        InitializeProductionMcpTools();
     }
 
     virtual AudioCodec *GetAudioCodec() override {
