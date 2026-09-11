@@ -433,7 +433,7 @@ void HerdsmanLcdDisplay::CreateSettingsPanel(lv_obj_t* parent) {
     lv_label_set_text(volume_value_label_, value);
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_MIC, "唤醒词", icon_font);
-    CreateSettingsValue(row, "你好小智");
+    CreateSettingsValue(row, "小牧博士");
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_LINK, "485串口", icon_font);
     lv_obj_t* serial_value = CreateSettingsValue(row, "已连接 ✓");
