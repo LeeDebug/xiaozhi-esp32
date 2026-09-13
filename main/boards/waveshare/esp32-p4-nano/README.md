@@ -5,15 +5,16 @@
 
 ## Production-monitoring Modbus
 
-This board starts an RTU master on UART1 (TX GPIO21, RX GPIO22) at 9600 baud, 8 data bits, no parity, and 1 stop bit. The attached production-monitor protocol is cached as four holding-register ranges:
+This board starts an on-demand RTU master on UART1 (TX GPIO20, RX GPIO21) at 9600 baud, 8 data bits, no parity, and 1 stop bit. Automatic polling is currently disabled by `kAutomaticPollingEnabled`; set it to `true` to restore the polling task.
 
-- Alarm registers 78-102 are read every second.
-- Water-control registers 0x67-0x68 are read every second; reserved register 0x69 is skipped.
-- General registers 0-77 and system/control registers 106-166 are read every five cycles.
-- MCP tool `self.production.main_water_valve.set` opens/closes the valve through register 0x67, and `self.production.water_temperature.get` returns the cached register 0x68 value as Celsius using a 0.001 scale.
+- MCP tools `self.production.main_water_valve.set` and `self.production.main_water_valve.get` write/read register 0x6B only when invoked. A successful function-code 0x06 response means the write command was accepted; current hardware state is queried separately with the getter.
+- MCP tool `self.production.water_temperature.get` reads register 0x6C only when invoked and returns its value as Celsius using a 0.001 scale.
+- MCP tools `self.production.light.get` and `self.production.lights.get` read one or both configured light channels from registers 0x3B-0x3C.
+- MCP tools `self.production.light_1.open`, `self.production.light_1.close`, `self.production.light_2.open`, and `self.production.light_2.close` control the two light channels. Brightness is limited to 0-100 percent, where 0 means off.
+- MCP tool `self.production.silos.get_info` reads the current signed 32-bit weights of silos 1-4 from register pairs 0x02/0x03, 0x0E/0x0F, 0x1A/0x1B, and 0x26/0x27. The low word is read first, as required by the protocol.
 - Valve writes use protocol value 1 for open and 2 for closed.
 
-The device address defaults to 0, which means not configured; Modbus polling and writes are disabled until `ProductionModbus::SetDeviceAddress(1..247)` is called. Cached values are available through `GetCachedRegister()` and `GetSnapshot()`. Device writes use `WriteHoldingRegister()` and are serialized with polling by a shared bus mutex.
+The device address defaults to 0, which means not configured; Modbus reads and writes are disabled until `ProductionModbus::SetDeviceAddress(1..247)` is called. Successful on-demand reads are also retained in the cache and are available through `GetCachedRegister()` and `GetSnapshot()`. Reads and writes are serialized by a shared bus mutex.
 
 Only TX and RX are configured. The external RS485 transceiver must provide automatic direction control. If the hardware instead requires a DE/RE signal, add its GPIO and switch the UART to RS485 half-duplex mode.
 

@@ -1,3 +1,9 @@
+/*
+ * @Date: 2026-09-11 18:52:55
+ * @LastEditors: zhouke
+ * @LastEditTime: 2026-09-13 11:09:41
+ * @FilePath: \xiaozhi-esp32\main\boards\waveshare\esp32-p4-nano\config.h
+ */
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
 
@@ -21,8 +27,8 @@
 #define BOOT_BUTTON_GPIO        GPIO_NUM_35
 
 #define PRODUCTION_MODBUS_UART_PORT   UART_NUM_1
-#define PRODUCTION_MODBUS_UART_TX_PIN GPIO_NUM_21
-#define PRODUCTION_MODBUS_UART_RX_PIN GPIO_NUM_22
+#define PRODUCTION_MODBUS_UART_TX_PIN GPIO_NUM_20
+#define PRODUCTION_MODBUS_UART_RX_PIN GPIO_NUM_21
 
 #define DISPLAY_WIDTH 480
 #define DISPLAY_HEIGHT 1920

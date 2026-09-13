@@ -29,8 +29,11 @@ esp_err_t ProductionModbus::Start() {
 
     bus_mutex_ = xSemaphoreCreateMutex();
     cache_mutex_ = xSemaphoreCreateMutex();
-    task_stopped_ = xSemaphoreCreateBinary();
-    if (bus_mutex_ == nullptr || cache_mutex_ == nullptr || task_stopped_ == nullptr) {
+    if (kAutomaticPollingEnabled) {
+        task_stopped_ = xSemaphoreCreateBinary();
+    }
+    if (bus_mutex_ == nullptr || cache_mutex_ == nullptr ||
+        (kAutomaticPollingEnabled && task_stopped_ == nullptr)) {
         CleanupAfterStartFailure();
         return ESP_ERR_NO_MEM;
     }
@@ -72,15 +75,19 @@ esp_err_t ProductionModbus::Start() {
         return err;
     }
 
-    running_.store(true);
-    if (xTaskCreate(PollingTaskEntry, "production_mb", kTaskStackSize, this, kTaskPriority,
-                    &task_handle_) != pdPASS) {
-        running_.store(false);
-        CleanupAfterStartFailure();
-        return ESP_ERR_NO_MEM;
+    if (kAutomaticPollingEnabled) {
+        running_.store(true);
+        if (xTaskCreate(PollingTaskEntry, "production_mb", kTaskStackSize, this, kTaskPriority,
+                        &task_handle_) != pdPASS) {
+            running_.store(false);
+            CleanupAfterStartFailure();
+            return ESP_ERR_NO_MEM;
+        }
     }
 
-    ESP_LOGI(kTag, "Started RTU master on UART%d, TX=%d RX=%d, 9600 8N1; device address is unset",
+    ESP_LOGI(kTag,
+             "Started %s RTU master on UART%d, TX=%d RX=%d, 9600 8N1; device address is unset",
+             kAutomaticPollingEnabled ? "polling" : "on-demand",
              static_cast<int>(PRODUCTION_MODBUS_UART_PORT),
              static_cast<int>(PRODUCTION_MODBUS_UART_TX_PIN),
              static_cast<int>(PRODUCTION_MODBUS_UART_RX_PIN));
@@ -135,6 +142,21 @@ esp_err_t ProductionModbus::SetDeviceAddress(uint8_t address) {
 
 uint8_t ProductionModbus::GetDeviceAddress() const { return device_address_.load(); }
 
+esp_err_t ProductionModbus::ReadHoldingRegister(uint16_t register_address, uint16_t& value) {
+    return ReadHoldingRegisters(register_address, 1, &value);
+}
+
+esp_err_t ProductionModbus::ReadHoldingRegisters(uint16_t start, uint16_t count, uint16_t* values) {
+    uint8_t address = device_address_.load();
+    if (!started_.load() || master_handle_ == nullptr || address == kUnsetDeviceAddress) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (values == nullptr) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return ReadHoldingRegisters(address, start, count, values);
+}
+
 bool ProductionModbus::GetCachedRegister(uint16_t register_address, uint16_t& value) const {
     if (register_address >= kRegisterCount || cache_mutex_ == nullptr) {
         return false;
@@ -164,6 +186,9 @@ esp_err_t ProductionModbus::WriteHoldingRegister(uint16_t register_address, uint
     uint8_t address = device_address_.load();
     if (!started_.load() || master_handle_ == nullptr || address == kUnsetDeviceAddress) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (register_address >= kRegisterCount) {
+        return ESP_ERR_INVALID_ARG;
     }
     if (xSemaphoreTake(bus_mutex_, pdMS_TO_TICKS(kBusLockTimeoutMs)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
@@ -204,11 +229,14 @@ void ProductionModbus::PollingTask() {
             continue;
         }
 
-        esp_err_t alarm_err = ReadHoldingRegisters(address, kAlarmStart, kAlarmCount);
-        esp_err_t water_err = ReadHoldingRegisters(address, kWaterStatusStart, kWaterStatusCount);
+        esp_err_t alarm_err = ReadHoldingRegisters(address, kAlarmStart, kAlarmCount, nullptr);
+        esp_err_t water_err =
+            ReadHoldingRegisters(address, kWaterStatusStart, kWaterStatusCount, nullptr);
         if ((cycle % kFullPollDivider) == 0) {
-            esp_err_t general_err = ReadHoldingRegisters(address, kGeneralStart, kGeneralCount);
-            esp_err_t system_err = ReadHoldingRegisters(address, kSystemStart, kSystemCount);
+            esp_err_t general_err =
+                ReadHoldingRegisters(address, kGeneralStart, kGeneralCount, nullptr);
+            esp_err_t system_err =
+                ReadHoldingRegisters(address, kSystemStart, kSystemCount, nullptr);
             if (general_err != ESP_OK || system_err != ESP_OK) {
                 ESP_LOGW(kTag, "Full state poll incomplete: general=%s system=%s",
                          esp_err_to_name(general_err), esp_err_to_name(system_err));
@@ -241,7 +269,7 @@ void ProductionModbus::PollingTask() {
 }
 
 esp_err_t ProductionModbus::ReadHoldingRegisters(uint8_t device_address, uint16_t start,
-                                                 uint16_t count) {
+                                                 uint16_t count, uint16_t* values) {
     if (count == 0 || count > kMaximumReadRegisters || start + count > kRegisterCount) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -249,24 +277,30 @@ esp_err_t ProductionModbus::ReadHoldingRegisters(uint8_t device_address, uint16_
         return ESP_ERR_TIMEOUT;
     }
 
-    std::array<uint16_t, kMaximumReadRegisters> values{};
+    std::array<uint16_t, kMaximumReadRegisters> register_values{};
     mb_param_request_t request = {};
     request.slave_addr = device_address;
     request.command = kReadHoldingRegistersFunction;
     request.reg_start = start;
     request.reg_size = count;
-    esp_err_t err = mbc_master_send_request(master_handle_, &request, values.data());
+    esp_err_t err = mbc_master_send_request(master_handle_, &request, register_values.data());
     xSemaphoreGive(bus_mutex_);
 
-    if (err == ESP_OK && device_address_.load() == device_address) {
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (values != nullptr) {
+        std::copy_n(register_values.begin(), count, values);
+    }
+    if (device_address_.load() == device_address) {
         xSemaphoreTake(cache_mutex_, portMAX_DELAY);
-        std::copy_n(values.begin(), count, cache_.holding_registers.begin() + start);
+        std::copy_n(register_values.begin(), count, cache_.holding_registers.begin() + start);
         std::fill_n(cache_.valid.begin() + start, count, true);
         cache_.last_update_tick = xTaskGetTickCount();
         ++cache_.generation;
         xSemaphoreGive(cache_mutex_);
     }
-    return err;
+    return ESP_OK;
 }
 
 void ProductionModbus::InvalidateCache() {

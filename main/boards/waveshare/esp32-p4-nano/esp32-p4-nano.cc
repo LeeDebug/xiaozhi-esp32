@@ -295,6 +295,7 @@ public:
         if (modbus_err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start production Modbus: %s", esp_err_to_name(modbus_err));
         }
+        ProductionModbus::GetInstance().SetDeviceAddress(0x01);
         InitializeProductionMcpTools();
     }
 

@@ -255,8 +255,8 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
         .io_handle = panel_io,
         .panel_handle = panel,
         .control_handle = nullptr,
-        .buffer_size = static_cast<uint32_t>(width_ * 50),
-        .double_buffer = false,
+        .buffer_size = static_cast<uint32_t>(width_ * height_),
+        .double_buffer = true,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),
         .monochrome = false,
@@ -270,7 +270,7 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
         .flags =
             {
                 .buff_dma = true,
-                .buff_spiram = false,
+                .buff_spiram = true,
                 .sw_rotate = true,
             },
     };

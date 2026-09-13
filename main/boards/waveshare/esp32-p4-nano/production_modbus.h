@@ -34,13 +34,17 @@ public:
     esp_err_t SetDeviceAddress(uint8_t address);
     uint8_t GetDeviceAddress() const;
 
+    // Reads one holding register on demand and updates its cached value.
+    esp_err_t ReadHoldingRegister(uint16_t register_address, uint16_t& value);
+    esp_err_t ReadHoldingRegisters(uint16_t start, uint16_t count, uint16_t* values);
+
     // Returns false until the requested register has been read successfully.
     bool GetCachedRegister(uint16_t register_address, uint16_t& value) const;
     void GetSnapshot(StateSnapshot& snapshot) const;
 
-    // The write uses the same bus mutex as the polling task, so an RTU request
-    // can never overlap a periodic read. The call blocks until the request
-    // completes or the configured Modbus response timeout expires.
+    // Reads and writes use the same bus mutex, so RTU requests cannot overlap.
+    // The call blocks until the request completes or the configured Modbus
+    // response timeout expires.
     esp_err_t WriteHoldingRegister(uint16_t register_address, uint16_t value);
 
 private:
@@ -49,11 +53,14 @@ private:
     ProductionModbus(const ProductionModbus&) = delete;
     ProductionModbus& operator=(const ProductionModbus&) = delete;
 
+    // Keep the polling implementation available for later use, but do not
+    // create the polling task while Modbus access is request-driven.
+    static constexpr bool kAutomaticPollingEnabled = false;
     static constexpr uint16_t kGeneralStart = 0;
     static constexpr uint16_t kGeneralCount = 78;
     static constexpr uint16_t kAlarmStart = 78;
     static constexpr uint16_t kAlarmCount = 25;
-    static constexpr uint16_t kWaterStatusStart = 0x67;
+    static constexpr uint16_t kWaterStatusStart = 0x6B;
     static constexpr uint16_t kWaterStatusCount = 2;
     static constexpr uint16_t kSystemStart = 106;
     static constexpr uint16_t kSystemCount = 61;
@@ -65,7 +72,8 @@ private:
 
     static void PollingTaskEntry(void* context);
     void PollingTask();
-    esp_err_t ReadHoldingRegisters(uint8_t device_address, uint16_t start, uint16_t count);
+    esp_err_t ReadHoldingRegisters(uint8_t device_address, uint16_t start, uint16_t count,
+                                   uint16_t* values);
     void InvalidateCache();
     void CleanupAfterStartFailure();
 
