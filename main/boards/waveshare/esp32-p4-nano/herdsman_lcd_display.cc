@@ -4,6 +4,7 @@
 #include "audio/audio_codec.h"
 #include "board.h"
 #include "boards/common/backlight.h"
+#include "config.h"
 #include "display/lvgl_display/lvgl_theme.h"
 
 #include <material_symbols.h>
@@ -22,13 +23,25 @@ LV_FONT_DECLARE(font_herdsman_ui_30_4);
 
 namespace {
 
-constexpr uint32_t kOrange = 0xE84A0C;
-constexpr uint32_t kDarkText = 0x15191F;
-constexpr uint32_t kMutedText = 0x73777D;
-constexpr uint32_t kPageBackground = 0xEEF0F2;
-constexpr uint32_t kCardBackground = 0xFFFFFF;
-constexpr uint32_t kUserBubble = 0xE1E3E5;
-constexpr uint32_t kAssistantBubble = 0xFFFFFF;
+constexpr uint32_t kAccent = HERDSMAN_UI_COLOR_ACCENT;
+constexpr uint32_t kAccentPressed = HERDSMAN_UI_COLOR_ACCENT_PRESSED;
+constexpr uint32_t kOnAccent = HERDSMAN_UI_COLOR_ON_ACCENT;
+constexpr uint32_t kText = HERDSMAN_UI_COLOR_TEXT;
+constexpr uint32_t kMutedText = HERDSMAN_UI_COLOR_MUTED_TEXT;
+constexpr uint32_t kIcon = HERDSMAN_UI_COLOR_ICON;
+constexpr uint32_t kPageBackground = HERDSMAN_UI_COLOR_PAGE;
+constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD;
+constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER;
+constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER;
+constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW;
+constexpr uint32_t kUserBubble = HERDSMAN_UI_COLOR_USER_BUBBLE;
+constexpr uint32_t kAssistantBubble = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE;
+constexpr uint32_t kSystemBubble = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE;
+constexpr uint32_t kAssistantAvatarBackground = HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG;
+constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG;
+constexpr uint32_t kUserAvatarForeground = HERDSMAN_UI_COLOR_USER_AVATAR_FG;
+constexpr uint32_t kSuccess = HERDSMAN_UI_COLOR_SUCCESS;
+constexpr uint32_t kDanger = HERDSMAN_UI_COLOR_DANGER;
 
 void MakePlain(lv_obj_t* object) {
     lv_obj_set_style_border_width(object, 0, 0);
@@ -41,14 +54,15 @@ void StyleCard(lv_obj_t* object, int radius) {
     lv_obj_set_style_bg_color(object, lv_color_hex(kCardBackground), 0);
     lv_obj_set_style_bg_opa(object, LV_OPA_90, 0);
     lv_obj_set_style_border_width(object, 1, 0);
-    lv_obj_set_style_border_color(object, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(object, lv_color_hex(kCardBorder), 0);
     lv_obj_set_style_radius(object, radius, 0);
     lv_obj_set_style_shadow_width(object, 22, 0);
     lv_obj_set_style_shadow_opa(object, LV_OPA_20, 0);
-    lv_obj_set_style_shadow_color(object, lv_color_hex(0x7F858B), 0);
+    lv_obj_set_style_shadow_color(object, lv_color_hex(kShadow), 0);
     lv_obj_set_style_shadow_offset_y(object, 6, 0);
 }
 
+#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
 lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* text,
                                const lv_font_t* text_font, const lv_font_t* icon_font, bool filled,
                                lv_event_cb_t callback, void* user_data) {
@@ -56,15 +70,15 @@ lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* t
     lv_obj_set_size(button, 310, filled ? 90 : 82);
     lv_obj_set_style_radius(button, 20, 0);
     lv_obj_set_style_border_width(button, filled ? 0 : 3, 0);
-    lv_obj_set_style_border_color(button, lv_color_hex(kOrange), 0);
+    lv_obj_set_style_border_color(button, lv_color_hex(kAccent), 0);
     lv_obj_set_style_bg_color(button,
-                              filled ? lv_color_hex(kOrange) : lv_color_hex(kCardBackground), 0);
+                              filled ? lv_color_hex(kAccent) : lv_color_hex(kCardBackground), 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_shadow_width(button, filled ? 18 : 0, 0);
     lv_obj_set_style_shadow_opa(button, filled ? LV_OPA_30 : LV_OPA_TRANSP, 0);
-    lv_obj_set_style_shadow_color(button, lv_color_hex(kOrange), 0);
+    lv_obj_set_style_shadow_color(button, lv_color_hex(kAccent), 0);
     lv_obj_set_style_shadow_offset_y(button, 7, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(0xC83D08), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(kAccentPressed), LV_STATE_PRESSED);
     lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(button, 14, 0);
@@ -72,15 +86,18 @@ lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* t
 
     lv_obj_t* icon_label = lv_label_create(button);
     lv_obj_set_style_text_font(icon_label, icon_font, 0);
-    lv_obj_set_style_text_color(icon_label, filled ? lv_color_white() : lv_color_hex(kOrange), 0);
+    lv_obj_set_style_text_color(icon_label,
+                                filled ? lv_color_hex(kOnAccent) : lv_color_hex(kAccent), 0);
     lv_label_set_text(icon_label, icon);
 
     lv_obj_t* text_label = lv_label_create(button);
     lv_obj_set_style_text_font(text_label, text_font, 0);
-    lv_obj_set_style_text_color(text_label, filled ? lv_color_white() : lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(text_label,
+                                filled ? lv_color_hex(kOnAccent) : lv_color_hex(kText), 0);
     lv_label_set_text(text_label, text);
     return button;
 }
+#endif
 
 lv_obj_t* CreateSettingsRow(lv_obj_t* parent, const char* icon, const char* title,
                             const lv_font_t* icon_font) {
@@ -90,19 +107,19 @@ lv_obj_t* CreateSettingsRow(lv_obj_t* parent, const char* icon, const char* titl
     lv_obj_set_style_border_width(row, 0, 0);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, lv_color_hex(0xD9DDE0), LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, lv_color_hex(kDivider), LV_PART_MAIN);
     lv_obj_set_style_pad_all(row, 0, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t* icon_label = lv_label_create(row);
     lv_obj_set_style_text_font(icon_label, icon_font, 0);
-    lv_obj_set_style_text_color(icon_label, lv_color_hex(kOrange), 0);
+    lv_obj_set_style_text_color(icon_label, lv_color_hex(kAccent), 0);
     lv_label_set_text(icon_label, icon);
     lv_obj_align(icon_label, LV_ALIGN_LEFT_MID, 22, 0);
 
     lv_obj_t* title_label = lv_label_create(row);
-    lv_obj_set_style_text_color(title_label, lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(title_label, lv_color_hex(kText), 0);
     lv_label_set_text(title_label, title);
     lv_obj_align(title_label, LV_ALIGN_LEFT_MID, 72, 0);
     return row;
@@ -120,13 +137,13 @@ lv_obj_t* CreateSettingsValue(lv_obj_t* row, const char* value) {
 
 void StyleSlider(lv_obj_t* slider) {
     lv_obj_set_size(slider, 300, 14);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(0xD9DDE0), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(kDivider), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(kOrange), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(kAccent), LV_PART_INDICATOR);
     lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(kOrange), LV_PART_KNOB);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(kAccent), LV_PART_KNOB);
     lv_obj_set_style_bg_opa(slider, LV_OPA_COVER, LV_PART_KNOB);
     lv_obj_set_style_pad_all(slider, 8, LV_PART_KNOB);
 }
@@ -153,7 +170,7 @@ void HerdsmanLcdDisplay::SetupUI() {
     theme->text_font()->SetFallback(&font_herdsman_ui_30_4);
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
-    lv_obj_set_style_text_color(screen, lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(screen, lv_color_hex(kText), 0);
     lv_obj_set_style_bg_color(screen, lv_color_hex(kPageBackground), 0);
 
     container_ = lv_obj_create(screen);
@@ -172,11 +189,11 @@ void HerdsmanLcdDisplay::SetupUI() {
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_size(low_battery_popup_, 720, 70);
     lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, -18);
-    lv_obj_set_style_bg_color(low_battery_popup_, lv_color_hex(0xD93333), 0);
+    lv_obj_set_style_bg_color(low_battery_popup_, lv_color_hex(kDanger), 0);
     lv_obj_set_style_border_width(low_battery_popup_, 0, 0);
     lv_obj_set_style_radius(low_battery_popup_, 18, 0);
     low_battery_label_ = lv_label_create(low_battery_popup_);
-    lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
+    lv_obj_set_style_text_color(low_battery_label_, lv_color_hex(kOnAccent), 0);
     lv_label_set_text(low_battery_label_, "电量不足，请及时充电");
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
@@ -201,7 +218,7 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
 
     network_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
-    lv_obj_set_style_text_color(network_label_, lv_color_hex(0x3F4C5B), 0);
+    lv_obj_set_style_text_color(network_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(network_label_, MATERIAL_SYMBOLS_WIFI);
     lv_obj_align(network_label_, LV_ALIGN_LEFT_MID, 30, 0);
 
@@ -213,7 +230,7 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(status_label_, 1000);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(status_label_, lv_color_hex(kOrange), 0);
+    lv_obj_set_style_text_color(status_label_, lv_color_hex(kAccent), 0);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(status_label_, "初始化中...");
     lv_obj_center(status_label_);
@@ -221,20 +238,20 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, 1000);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(notification_label_, lv_color_hex(kOrange), 0);
+    lv_obj_set_style_text_color(notification_label_, lv_color_hex(kAccent), 0);
     lv_label_set_text(notification_label_, "");
     lv_obj_center(notification_label_);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
     mute_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
-    lv_obj_set_style_text_color(mute_label_, lv_color_hex(0x3F4C5B), 0);
+    lv_obj_set_style_text_color(mute_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(mute_label_, "");
     lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -510, 0);
 
     battery_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
-    lv_obj_set_style_text_color(battery_label_, lv_color_hex(0x3F4C5B), 0);
+    lv_obj_set_style_text_color(battery_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(battery_label_, "");
     lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -458, 0);
 
@@ -243,14 +260,38 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_style_text_align(date_time_label_, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_color(date_time_label_, lv_color_hex(kMutedText), 0);
     lv_label_set_text(date_time_label_, "----/--/-- --:--:--");
+#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
     lv_obj_align(date_time_label_, LV_ALIGN_RIGHT_MID, -24, 0);
+#else
+    lv_obj_align(date_time_label_, LV_ALIGN_RIGHT_MID, -92, 0);
+
+    lv_obj_t* settings_button = lv_button_create(top_bar_);
+    lv_obj_set_size(settings_button, 64, 56);
+    lv_obj_align(settings_button, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_set_style_radius(settings_button, 16, 0);
+    lv_obj_set_style_bg_color(settings_button, lv_color_hex(kCardBackground), 0);
+    lv_obj_set_style_bg_color(settings_button, lv_color_hex(kAccent), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(settings_button, 2, 0);
+    lv_obj_set_style_border_color(settings_button, lv_color_hex(kAccent), 0);
+    lv_obj_set_style_shadow_width(settings_button, 0, 0);
+    lv_obj_add_event_cb(settings_button, SettingsButtonEvent, LV_EVENT_CLICKED, this);
+
+    settings_button_icon_ = lv_label_create(settings_button);
+    lv_obj_set_style_text_font(settings_button_icon_, icon_font, 0);
+    lv_obj_set_style_text_color(settings_button_icon_, lv_color_hex(kAccent), 0);
+    lv_label_set_text(settings_button_icon_, MATERIAL_SYMBOLS_SETTINGS);
+    lv_obj_center(settings_button_icon_);
+#endif
 }
 
 void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
+#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
     auto* theme = static_cast<LvglTheme*>(current_theme_);
     const lv_font_t* text_font = theme->text_font()->font();
     const lv_font_t* icon_font = theme->large_icon_font()->font();
+#endif
 
+#if HERDSMAN_UI_SHOW_LEFT_LOGO
     lv_obj_t* left_panel = lv_obj_create(parent);
     lv_obj_set_pos(left_panel, 0, kTopBarHeight + 16);
     lv_obj_set_size(left_panel, kSideWidth, LV_VER_RES - kTopBarHeight - 16);
@@ -259,10 +300,15 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     lv_obj_t* logo = lv_image_create(left_panel);
     lv_image_set_src(logo, &herdsman_logo);
     lv_obj_center(logo);
+#endif
+
+    constexpr int kLeftPanelWidth = HERDSMAN_UI_SHOW_LEFT_LOGO ? kSideWidth : 0;
+    constexpr int kRightPanelWidth = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? kSideWidth : 0;
+    const int content_width = LV_HOR_RES - kLeftPanelWidth - kRightPanelWidth;
 
     content_ = lv_obj_create(parent);
-    lv_obj_set_pos(content_, kSideWidth, kTopBarHeight + 24);
-    lv_obj_set_size(content_, kCenterWidth, LV_VER_RES - kTopBarHeight - 40);
+    lv_obj_set_pos(content_, kLeftPanelWidth, kTopBarHeight + 24);
+    lv_obj_set_size(content_, content_width, LV_VER_RES - kTopBarHeight - 40);
     StyleCard(content_, 24);
     lv_obj_set_style_pad_all(content_, 0, 0);
     lv_obj_clear_flag(content_, LV_OBJ_FLAG_SCROLLABLE);
@@ -280,8 +326,9 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
 
     CreateStandbyPanel();
 
+#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
     lv_obj_t* right_panel = lv_obj_create(parent);
-    lv_obj_set_pos(right_panel, kSideWidth + kCenterWidth, kTopBarHeight + 16);
+    lv_obj_set_pos(right_panel, kLeftPanelWidth + content_width, kTopBarHeight + 16);
     lv_obj_set_size(right_panel, kSideWidth, LV_VER_RES - kTopBarHeight - 16);
     MakePlain(right_panel);
     lv_obj_clear_flag(right_panel, LV_OBJ_FLAG_SCROLLABLE);
@@ -298,6 +345,7 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     lv_obj_align(chat_button, LV_ALIGN_CENTER, 0, 66);
     chat_button_icon_ = lv_obj_get_child(chat_button, 0);
     chat_button_label_ = lv_obj_get_child(chat_button, 1);
+#endif
 }
 
 void HerdsmanLcdDisplay::CreateStandbyPanel() {
@@ -313,7 +361,7 @@ void HerdsmanLcdDisplay::CreateStandbyPanel() {
     lv_obj_clear_flag(standby_panel_, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* title = lv_label_create(standby_panel_);
-    lv_obj_set_style_text_color(title, lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(kText), 0);
     lv_label_set_text(title, "推荐问题");
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 6, 0);
 
@@ -342,11 +390,12 @@ void HerdsmanLcdDisplay::CreateStandbyPanel() {
         lv_obj_set_style_pad_column(row, 16, 0);
 
         lv_obj_t* bullet = lv_label_create(row);
-        lv_obj_set_style_text_color(bullet, lv_color_hex(kOrange), 0);
+        lv_obj_set_style_text_color(bullet, lv_color_hex(kAccent), 0);
         lv_label_set_text(bullet, "•");
         lv_obj_t* text = lv_label_create(row);
         lv_obj_set_width(text, 760);
         lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(text, lv_color_hex(kText), 0);
         lv_label_set_text(text, question);
     }
 }
@@ -379,13 +428,13 @@ void HerdsmanLcdDisplay::CreateSettingsPanel(lv_obj_t* parent) {
     lv_obj_add_event_cb(back_button, BackButtonEvent, LV_EVENT_CLICKED, this);
     lv_obj_t* back_icon = lv_label_create(back_button);
     lv_obj_set_style_text_font(back_icon, icon_font, 0);
-    lv_obj_set_style_text_color(back_icon, lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(back_icon, lv_color_hex(kText), 0);
     lv_label_set_text(back_icon, MATERIAL_SYMBOLS_ARROW_BACK);
     lv_obj_center(back_icon);
 
     lv_obj_t* header_title = lv_label_create(header);
     lv_label_set_text(header_title, "设置");
-    lv_obj_set_style_text_color(header_title, lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(header_title, lv_color_hex(kText), 0);
     lv_obj_center(header_title);
 
     lv_obj_t* card = lv_obj_create(settings_panel_);
@@ -437,7 +486,7 @@ void HerdsmanLcdDisplay::CreateSettingsPanel(lv_obj_t* parent) {
 
     row = CreateSettingsRow(card, MATERIAL_SYMBOLS_LINK, "485串口", icon_font);
     lv_obj_t* serial_value = CreateSettingsValue(row, "已连接 ✓");
-    lv_obj_set_style_text_color(serial_value, lv_color_hex(0x279B55), 0);
+    lv_obj_set_style_text_color(serial_value, lv_color_hex(kSuccess), 0);
 
     lv_obj_add_flag(settings_panel_, LV_OBJ_FLAG_HIDDEN);
 }
@@ -478,8 +527,8 @@ void HerdsmanLcdDisplay::SetTheme(Theme* theme) {
         lv_obj_invalidate(screen);
     }
 
-    // The Herdsman interface deliberately keeps its fixed light brand palette for both saved
-    // themes; only the font asset is refreshed here.
+    // The Herdsman interface keeps the compile-time palette selected in config.h; runtime theme
+    // changes only refresh the font assets.
     Display::SetTheme(lvgl_theme);
 }
 
@@ -553,7 +602,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     };
 
     if (is_assistant) {
-        create_avatar(MATERIAL_SYMBOLS_ROBOT_2, 0xFFFFFF, kOrange);
+        create_avatar(MATERIAL_SYMBOLS_ROBOT_2, kAssistantAvatarBackground, kAccent);
     }
 
     lv_obj_t* bubble = lv_obj_create(row);
@@ -563,7 +612,8 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_set_style_border_width(bubble, 0, 0);
     lv_obj_set_style_pad_all(bubble, 14, 0);
     lv_obj_set_style_bg_color(
-        bubble, lv_color_hex(is_user ? kUserBubble : (is_assistant ? kAssistantBubble : 0xFFF1E8)),
+        bubble,
+        lv_color_hex(is_user ? kUserBubble : (is_assistant ? kAssistantBubble : kSystemBubble)),
         0);
     lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
@@ -572,12 +622,12 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_set_width(text,
                      (is_user || is_assistant) ? kChatBubbleWidth - 28 : kSystemBubbleWidth - 28);
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(text, lv_color_hex(kDarkText), 0);
+    lv_obj_set_style_text_color(text, lv_color_hex(kText), 0);
     lv_label_set_text(text, content);
     chat_message_label_ = text;
 
     if (is_user) {
-        create_avatar(MATERIAL_SYMBOLS_PERSON, 0xC7C9CB, 0x787B7F);
+        create_avatar(MATERIAL_SYMBOLS_PERSON, kUserAvatarBackground, kUserAvatarForeground);
     }
 
     lv_obj_scroll_to_view_recursive(row, LV_ANIM_ON);

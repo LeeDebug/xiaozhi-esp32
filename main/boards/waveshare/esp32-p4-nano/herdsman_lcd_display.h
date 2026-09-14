@@ -18,7 +18,6 @@ public:
 
 private:
     static constexpr int kTopBarHeight = 72;
-    static constexpr int kCenterWidth = 1000;
     static constexpr int kSideWidth = 460;
     static constexpr int kChatBubbleWidth = 780;
     static constexpr int kSystemBubbleWidth = 850;
