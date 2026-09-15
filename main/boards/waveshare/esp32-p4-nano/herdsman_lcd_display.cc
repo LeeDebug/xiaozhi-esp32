@@ -1,6 +1,7 @@
 #include "herdsman_lcd_display.h"
 
 #include "application.h"
+#include "assets.h"
 #include "audio/audio_codec.h"
 #include "board.h"
 #include "boards/common/backlight.h"
@@ -155,11 +156,22 @@ HerdsmanLcdDisplay::HerdsmanLcdDisplay(esp_lcd_panel_io_handle_t panel_io,
                                        int offset_x, int offset_y, bool mirror_x, bool mirror_y,
                                        bool swap_xy)
     : MipiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y,
-                     swap_xy) {}
+                     swap_xy) {
+    auto* theme = static_cast<LvglTheme*>(current_theme_);
+    if (theme != nullptr && theme->text_font() != nullptr) {
+        theme->text_font()->SetFallback(&font_herdsman_ui_30_4);
+    }
+}
 
 void HerdsmanLcdDisplay::SetupUI() {
     if (setup_ui_called_) {
         return;
+    }
+
+    // Apply the complete font from the assets partition before any labels capture a font pointer.
+    auto& assets = Assets::GetInstance();
+    if (assets.partition_valid()) {
+        assets.Apply(false);
     }
 
     Display::SetupUI();
@@ -167,7 +179,6 @@ void HerdsmanLcdDisplay::SetupUI() {
 
     auto* theme = static_cast<LvglTheme*>(current_theme_);
     const lv_font_t* text_font = theme->text_font()->font();
-    theme->text_font()->SetFallback(&font_herdsman_ui_30_4);
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(kText), 0);
