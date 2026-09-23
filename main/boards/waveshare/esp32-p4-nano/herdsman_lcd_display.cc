@@ -66,9 +66,9 @@ void StyleCard(lv_obj_t* object, int radius) {
 #if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
 lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* text,
                                const lv_font_t* text_font, const lv_font_t* icon_font, bool filled,
-                               lv_event_cb_t callback, void* user_data) {
+                               int width, lv_event_cb_t callback, void* user_data) {
     lv_obj_t* button = lv_button_create(parent);
-    lv_obj_set_size(button, 310, filled ? 90 : 82);
+    lv_obj_set_size(button, width, filled ? 90 : 82);
     lv_obj_set_style_radius(button, 20, 0);
     lv_obj_set_style_border_width(button, filled ? 0 : 3, 0);
     lv_obj_set_style_border_color(button, lv_color_hex(kAccent), 0);
@@ -193,6 +193,7 @@ void HerdsmanLcdDisplay::SetupUI() {
     lv_obj_set_style_pad_all(container_, 0, 0);
     lv_obj_clear_flag(container_, LV_OBJ_FLAG_SCROLLABLE);
 
+    UpdateColumnWidths();
     CreateTopBar(container_);
     CreateHomeContent(container_);
     CreateSettingsPanel(screen);
@@ -234,12 +235,12 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_align(network_label_, LV_ALIGN_LEFT_MID, 30, 0);
 
     status_bar_ = lv_obj_create(top_bar_);
-    lv_obj_set_size(status_bar_, 900, kTopBarHeight);
+    lv_obj_set_size(status_bar_, content_width_, kTopBarHeight);
     MakePlain(status_bar_);
     lv_obj_center(status_bar_);
 
     status_label_ = lv_label_create(status_bar_);
-    lv_obj_set_width(status_label_, 1000);
+    lv_obj_set_width(status_label_, LV_PCT(100));
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, lv_color_hex(kAccent), 0);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -247,7 +248,7 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_center(status_label_);
 
     notification_label_ = lv_label_create(status_bar_);
-    lv_obj_set_width(notification_label_, 1000);
+    lv_obj_set_width(notification_label_, LV_PCT(100));
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, lv_color_hex(kAccent), 0);
     lv_label_set_text(notification_label_, "");
@@ -295,6 +296,25 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
 #endif
 }
 
+void HerdsmanLcdDisplay::UpdateColumnWidths() {
+    const int reference_center_width =
+        LV_HOR_RES * kReferenceCenterWidth / kReferenceScreenWidth;
+    side_column_width_ = (LV_HOR_RES - reference_center_width) / 2;
+
+    const int left_width = HERDSMAN_UI_SHOW_LEFT_LOGO ? side_column_width_ : 0;
+    const int right_width = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? side_column_width_ : 0;
+    content_width_ = LV_HOR_RES - left_width - right_width;
+
+    constexpr int kChatListHorizontalPadding = 28;
+    constexpr int kAvatarAndGapWidth = 66;
+    chat_bubble_width_ =
+        std::min(kMaxChatBubbleWidth,
+                 std::max(120, content_width_ - kChatListHorizontalPadding - kAvatarAndGapWidth));
+    system_bubble_width_ =
+        std::min(kMaxSystemBubbleWidth,
+                 std::max(120, content_width_ - kChatListHorizontalPadding));
+}
+
 void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
 #if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
     auto* theme = static_cast<LvglTheme*>(current_theme_);
@@ -305,7 +325,7 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
 #if HERDSMAN_UI_SHOW_LEFT_LOGO
     lv_obj_t* left_panel = lv_obj_create(parent);
     lv_obj_set_pos(left_panel, 0, kTopBarHeight + 16);
-    lv_obj_set_size(left_panel, kSideWidth, LV_VER_RES - kTopBarHeight - 16);
+    lv_obj_set_size(left_panel, side_column_width_, LV_VER_RES - kTopBarHeight - 16);
     MakePlain(left_panel);
 
     lv_obj_t* logo = lv_image_create(left_panel);
@@ -313,13 +333,12 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     lv_obj_center(logo);
 #endif
 
-    constexpr int kLeftPanelWidth = HERDSMAN_UI_SHOW_LEFT_LOGO ? kSideWidth : 0;
-    constexpr int kRightPanelWidth = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? kSideWidth : 0;
-    const int content_width = LV_HOR_RES - kLeftPanelWidth - kRightPanelWidth;
+    const int left_panel_width = HERDSMAN_UI_SHOW_LEFT_LOGO ? side_column_width_ : 0;
+    const int right_panel_width = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? side_column_width_ : 0;
 
     content_ = lv_obj_create(parent);
-    lv_obj_set_pos(content_, kLeftPanelWidth, kTopBarHeight + 24);
-    lv_obj_set_size(content_, content_width, LV_VER_RES - kTopBarHeight - 40);
+    lv_obj_set_pos(content_, left_panel_width, kTopBarHeight + 24);
+    lv_obj_set_size(content_, content_width_, LV_VER_RES - kTopBarHeight - 40);
     StyleCard(content_, 24);
     lv_obj_set_style_pad_all(content_, 0, 0);
     lv_obj_clear_flag(content_, LV_OBJ_FLAG_SCROLLABLE);
@@ -339,20 +358,22 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
 
 #if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
     lv_obj_t* right_panel = lv_obj_create(parent);
-    lv_obj_set_pos(right_panel, kLeftPanelWidth + content_width, kTopBarHeight + 16);
-    lv_obj_set_size(right_panel, kSideWidth, LV_VER_RES - kTopBarHeight - 16);
+    lv_obj_set_pos(right_panel, left_panel_width + content_width_, kTopBarHeight + 16);
+    lv_obj_set_size(right_panel, right_panel_width, LV_VER_RES - kTopBarHeight - 16);
     MakePlain(right_panel);
     lv_obj_clear_flag(right_panel, LV_OBJ_FLAG_SCROLLABLE);
 
+    const int button_width = std::max(180, std::min(310, right_panel_width - 32));
     lv_obj_t* settings_button =
         CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_SETTINGS, "前往设置", text_font,
-                             icon_font, false, SettingsButtonEvent, this);
+                             icon_font, false, button_width, SettingsButtonEvent, this);
     lv_obj_align(settings_button, LV_ALIGN_CENTER, 0, -62);
     settings_button_icon_ = lv_obj_get_child(settings_button, 0);
     settings_button_label_ = lv_obj_get_child(settings_button, 1);
 
     lv_obj_t* chat_button = CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_MIC, "开始对话",
-                                                 text_font, icon_font, true, ChatButtonEvent, this);
+                                                 text_font, icon_font, true, button_width,
+                                                 ChatButtonEvent, this);
     lv_obj_align(chat_button, LV_ALIGN_CENTER, 0, 66);
     chat_button_icon_ = lv_obj_get_child(chat_button, 0);
     chat_button_label_ = lv_obj_get_child(chat_button, 1);
@@ -404,7 +425,8 @@ void HerdsmanLcdDisplay::CreateStandbyPanel() {
         lv_obj_set_style_text_color(bullet, lv_color_hex(kAccent), 0);
         lv_label_set_text(bullet, "•");
         lv_obj_t* text = lv_label_create(row);
-        lv_obj_set_width(text, 760);
+        lv_obj_set_width(text, 1);
+        lv_obj_set_flex_grow(text, 1);
         lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
         lv_obj_set_style_text_color(text, lv_color_hex(kText), 0);
         lv_label_set_text(text, question);
@@ -617,7 +639,9 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     }
 
     lv_obj_t* bubble = lv_obj_create(row);
-    lv_obj_set_width(bubble, (is_user || is_assistant) ? kChatBubbleWidth : kSystemBubbleWidth);
+    const int bubble_width =
+        (is_user || is_assistant) ? chat_bubble_width_ : system_bubble_width_;
+    lv_obj_set_width(bubble, bubble_width);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(bubble, 18, 0);
     lv_obj_set_style_border_width(bubble, 0, 0);
@@ -630,8 +654,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* text = lv_label_create(bubble);
-    lv_obj_set_width(text,
-                     (is_user || is_assistant) ? kChatBubbleWidth - 28 : kSystemBubbleWidth - 28);
+    lv_obj_set_width(text, bubble_width - 28);
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(text, lv_color_hex(kText), 0);
     lv_label_set_text(text, content);

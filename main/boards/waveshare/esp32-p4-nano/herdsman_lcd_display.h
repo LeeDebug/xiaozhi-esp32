@@ -18,9 +18,15 @@ public:
 
 private:
     static constexpr int kTopBarHeight = 72;
-    static constexpr int kSideWidth = 460;
-    static constexpr int kChatBubbleWidth = 780;
-    static constexpr int kSystemBubbleWidth = 850;
+    static constexpr int kReferenceScreenWidth = 1920;
+    static constexpr int kReferenceCenterWidth = 1000;
+    static constexpr int kMaxChatBubbleWidth = 780;
+    static constexpr int kMaxSystemBubbleWidth = 850;
+
+    int side_column_width_ = 460;
+    int content_width_ = kReferenceCenterWidth;
+    int chat_bubble_width_ = kMaxChatBubbleWidth;
+    int system_bubble_width_ = kMaxSystemBubbleWidth;
 
     lv_obj_t* chat_list_ = nullptr;
     lv_obj_t* standby_panel_ = nullptr;
@@ -41,6 +47,7 @@ private:
     void CreateHomeContent(lv_obj_t* parent);
     void CreateStandbyPanel();
     void CreateSettingsPanel(lv_obj_t* parent);
+    void UpdateColumnWidths();
     void UpdateHomeState();
     void UpdateDateTime();
     void UpdateSignalStrength();

@@ -289,8 +289,9 @@ private:
         esp_lcd_panel_reset(disp_panel);
         esp_lcd_panel_init(disp_panel);
 
-        display__ = new MipiLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                       DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        display__ = new HerdsmanLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                           DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
+                                           DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
         backlight_ = new CustomBacklight(codec_i2c_bus_);
         backlight_->RestoreBrightness();
     }
