@@ -53,8 +53,8 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
 /* Herdsman UI layout switches: set to 0 to give the panel space to the chat area. */
-#define HERDSMAN_UI_SHOW_LEFT_LOGO     0
-#define HERDSMAN_UI_SHOW_RIGHT_BUTTONS 0
+#define HERDSMAN_UI_SHOW_LEFT_LOGO     1
+#define HERDSMAN_UI_SHOW_RIGHT_BUTTONS 1
 #if (HERDSMAN_UI_SHOW_LEFT_LOGO != 0 && HERDSMAN_UI_SHOW_LEFT_LOGO != 1) || \
     (HERDSMAN_UI_SHOW_RIGHT_BUTTONS != 0 && HERDSMAN_UI_SHOW_RIGHT_BUTTONS != 1)
 #error "Herdsman UI visibility switches must be 0 or 1"
