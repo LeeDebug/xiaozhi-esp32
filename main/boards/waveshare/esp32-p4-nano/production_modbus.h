@@ -1,4 +1,13 @@
 #pragma once
+/**
+ * @file production_modbus.h
+ * @brief 产线 Modbus-RTU 主站单例:保持寄存器 0..166 缓存 + 按需读写.
+ *
+ * - 地址 0 = 未配置, 读写/轮询均禁用, 直到 `SetDeviceAddress(1..247)`.
+ * - 线程安全: 总线互斥 + 缓存互斥; 读/写共用总线锁, 不可重叠.
+ * - 当前 `kAutomaticPollingEnabled=false`, 为请求驱动模式, 轮询任务保留未启用.
+ * - 寄存器分区: 通用 0..77 / 告警 78..102 / 水 0x6B..0x6C / 系统 106..166(跳过保留 105).
+ */
 
 #include <array>
 #include <atomic>

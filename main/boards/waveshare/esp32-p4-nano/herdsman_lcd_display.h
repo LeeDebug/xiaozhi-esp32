@@ -1,4 +1,13 @@
 #pragma once
+/**
+ * @file herdsman_lcd_display.h
+ * @brief 牧场管理竖屏 UI:三栏布局(左Logo/中聊天/右按钮)+顶栏+设置页.
+ *
+ * 布局: 顶栏72px(网络/状态/静音/电池/时钟); 中部卡片为聊天列表,
+ * 空闲时覆盖“推荐问题”待机面板; 右栏为“前往设置/开始对话”按钮.
+ * 宽度按 1920 参考分辨率等比缩放, 见 `UpdateColumnWidths()`.
+ * 配色全部取自 `config.h` 的 HERDSMAN_UI_COLOR_* 编译期色板.
+ */
 
 #include "display/lcd_display.h"
 

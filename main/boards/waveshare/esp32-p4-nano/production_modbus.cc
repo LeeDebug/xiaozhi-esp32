@@ -1,3 +1,8 @@
+/**
+ * @file production_modbus.cc
+ * @brief ProductionModbus 实现: UART1 上 9600-8N1 RTU 主站, 按需读写 + 本地缓存.
+ * @note 仅 TX/RX 引脚, 依赖 RS485 自动收发切换, 无 DE/RE; 写成功即更新缓存/代系计数.
+ */
 #include "production_modbus.h"
 
 #include <algorithm>

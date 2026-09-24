@@ -1,3 +1,8 @@
+/**
+ * @file herdsman_lcd_display.cc
+ * @brief HerdsmanLcdDisplay 实现: LVGL 顶栏/三栏主页/待机问题/设置页/聊天气泡.
+ * 配色 kAccent 等取自 config.h 色板; 右栏按钮受 HERDSMAN_UI_SHOW_* 裁剪内容区.
+ */
 #include "herdsman_lcd_display.h"
 
 #include "application.h"
@@ -24,26 +29,28 @@ LV_FONT_DECLARE(font_herdsman_ui_30_4);
 
 namespace {
 
-constexpr uint32_t kAccent = HERDSMAN_UI_COLOR_ACCENT;
-constexpr uint32_t kAccentPressed = HERDSMAN_UI_COLOR_ACCENT_PRESSED;
-constexpr uint32_t kOnAccent = HERDSMAN_UI_COLOR_ON_ACCENT;
-constexpr uint32_t kText = HERDSMAN_UI_COLOR_TEXT;
-constexpr uint32_t kMutedText = HERDSMAN_UI_COLOR_MUTED_TEXT;
-constexpr uint32_t kIcon = HERDSMAN_UI_COLOR_ICON;
-constexpr uint32_t kPageBackground = HERDSMAN_UI_COLOR_PAGE;
-constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD;
-constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER;
-constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER;
-constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW;
-constexpr uint32_t kUserBubble = HERDSMAN_UI_COLOR_USER_BUBBLE;
-constexpr uint32_t kAssistantBubble = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE;
-constexpr uint32_t kSystemBubble = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE;
-constexpr uint32_t kAssistantAvatarBackground = HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG;
-constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG;
-constexpr uint32_t kUserAvatarForeground = HERDSMAN_UI_COLOR_USER_AVATAR_FG;
-constexpr uint32_t kSuccess = HERDSMAN_UI_COLOR_SUCCESS;
-constexpr uint32_t kDanger = HERDSMAN_UI_COLOR_DANGER;
+/* ===== 主题色板本地别名:全部取自 config.h HERDSMAN_UI_COLOR_*, 切主题只需改 HERDSMAN_UI_THEME ===== */
+constexpr uint32_t kAccent = HERDSMAN_UI_COLOR_ACCENT; // 主强调:按钮/高亮/发送键
+constexpr uint32_t kAccentPressed = HERDSMAN_UI_COLOR_ACCENT_PRESSED; // 按压态强调
+constexpr uint32_t kOnAccent = HERDSMAN_UI_COLOR_ON_ACCENT; // 强调色上白字/白图标
+constexpr uint32_t kText = HERDSMAN_UI_COLOR_TEXT; // 主文字
+constexpr uint32_t kMutedText = HERDSMAN_UI_COLOR_MUTED_TEXT; // 次要文字/占位/时间
+constexpr uint32_t kIcon = HERDSMAN_UI_COLOR_ICON; // 图标色
+constexpr uint32_t kPageBackground = HERDSMAN_UI_COLOR_PAGE; // 页面底
+constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD; // 卡片底
+constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER; // 卡片边框
+constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER; // 分割线
+constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW; // 阴影
+constexpr uint32_t kUserBubble = HERDSMAN_UI_COLOR_USER_BUBBLE; // 用户聊天气泡
+constexpr uint32_t kAssistantBubble = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE; // 助手气泡
+constexpr uint32_t kSystemBubble = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE; // 系统提示气泡
+constexpr uint32_t kAssistantAvatarBackground = HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG; // 助手头像底
+constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG; // 用户头像底
+constexpr uint32_t kUserAvatarForeground = HERDSMAN_UI_COLOR_USER_AVATAR_FG; // 用户头像字
+constexpr uint32_t kSuccess = HERDSMAN_UI_COLOR_SUCCESS; // 成功绿(在线/联网)
+constexpr uint32_t kDanger = HERDSMAN_UI_COLOR_DANGER; // 危险红(错误/离线)
 
+/** @brief 去卡片化:清边框/内边距/背景透明并关滚动条, 用于顶栏图标等裸控件. */
 void MakePlain(lv_obj_t* object) {
     lv_obj_set_style_border_width(object, 0, 0);
     lv_obj_set_style_pad_all(object, 0, 0);
@@ -51,6 +58,7 @@ void MakePlain(lv_obj_t* object) {
     lv_obj_set_scrollbar_mode(object, LV_SCROLLBAR_MODE_OFF);
 }
 
+/** @brief 卡片统一样式:主题底色+90%不透明+1px边框+22px柔阴影, radius 为圆角. */
 void StyleCard(lv_obj_t* object, int radius) {
     lv_obj_set_style_bg_color(object, lv_color_hex(kCardBackground), 0);
     lv_obj_set_style_bg_opa(object, LV_OPA_90, 0);
@@ -64,6 +72,7 @@ void StyleCard(lv_obj_t* object, int radius) {
 }
 
 #if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
+/** @brief 右栏图标+文字按钮:filled=实心强调底/白字, 否则白底描边; 点击回调经 user_data 回传. */
 lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* text,
                                const lv_font_t* text_font, const lv_font_t* icon_font, bool filled,
                                int width, lv_event_cb_t callback, void* user_data) {
@@ -100,6 +109,7 @@ lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* t
 }
 #endif
 
+/** @brief 设置页单行:透明底+底部 1px 分割线+左图标槽, 不可滚动点击, 内容由调用方填充. */
 lv_obj_t* CreateSettingsRow(lv_obj_t* parent, const char* icon, const char* title,
                             const lv_font_t* icon_font) {
     lv_obj_t* row = lv_obj_create(parent);

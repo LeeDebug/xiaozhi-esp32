@@ -4,6 +4,11 @@
  * @LastEditTime: 2026-09-13 10:52:12
  * @FilePath: \xiaozhi-esp32\main\boards\waveshare\esp32-p4-nano\production_mcp_tools.cc
  */
+/**
+ * @file production_mcp_tools.cc
+ * @brief MCP 工具实现: 水阀 0x6B(1开/2关)/水温 0x6C(x0.001℃)/灯光 0x3B,0x3C(0-100%)/
+ * 料塔 0x02,0x0E,0x1A,0x26(各2字小端 int32,kg). 每次调用先校验从机地址, 失败抛中文描述异常.
+ */
 #include "production_mcp_tools.h"
 
 #include <array>

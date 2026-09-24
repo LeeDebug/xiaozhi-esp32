@@ -1,3 +1,9 @@
+/**
+ * @file lcd_init_cmds.h
+ * @brief JD9365 10.1寸(800x1280) MIPI 屏上电初始化序列.
+ * @note 每项 {命令, 参数, 长度, 上电后延时ms}; 0xE0 为页切换,
+ * 0x11/0x29 为 SleepOut/DisplayOn(含 120/20ms 延时), 由 esp32-p4-nano.cc 引用.
+ */
 static const jd9365_lcd_init_cmd_t lcd_init_cmds[] = {
     {0xE0, (uint8_t[]){0x00}, 1, 0},
     {0xE1, (uint8_t[]){0x93}, 1, 0},

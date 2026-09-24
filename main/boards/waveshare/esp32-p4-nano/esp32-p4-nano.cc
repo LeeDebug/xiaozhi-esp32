@@ -1,3 +1,16 @@
+/**
+ * @file esp32-p4-nano.cc
+ * @brief 微雪 ESP32-P4-Nano 开发板实现:音频/显示/触摸/摄像头/按键/背光/Modbus 总装.
+ *
+ * 硬件链路一览:
+ * - 音频: ES8311 经 I2C_NUM_1 控制, I2S 传输, 见 `config.h` 引脚定义.
+ * - 显示: MIPI-DSI 面板(OTA7290B 8.8寸 / JD9365 10.1寸二选一) + `HerdsmanLcdDisplay`.
+ * - 背光: `CustomBacklight` 经 I2C(0x45/0x96) 写亮度.
+ * - 触摸: GT911 经同一 I2C 总线接入 LVGL.
+ * - 摄像头: OV5647 经 CSI + 同一 I2C(SCCB) 初始化.
+ * - 按键: BOOT 键单击切换对话 / 未配网时进入配网.
+ * - 产线外设: 启动 `ProductionModbus`(UART1) 并注册 MCP 工具.
+ */
 #include "sdkconfig.h"
 
 #if CONFIG_XIAOZHI_NETWORK_ETHERNET
@@ -46,12 +59,14 @@ using WaveshareEsp32p4nanoBase = WifiBoard;
 
 class CustomBacklight : public Backlight {
 public:
+    /** @brief 背光控制器, 复用 Codec I2C 总线, 每次设置亮度时临时挂载从机. */
     CustomBacklight(i2c_master_bus_handle_t i2c_handle)
         : Backlight(), i2c_handle_(i2c_handle) {}
 
 protected:
-    i2c_master_bus_handle_t i2c_handle_;
+    i2c_master_bus_handle_t i2c_handle_; // 复用的 I2C1 主机句柄(由 InitializeCodecI2c 创建)
 
+    /** @brief 写背光芯片: 7位地址 0x45, 寄存器 0x96 后跟一字节亮度值. */
     virtual void SetBrightnessImpl(uint8_t brightness) override {
         uint8_t i2c_address = 0x45;     // 7-bit address
         uint8_t reg = 0x96;
@@ -89,6 +104,7 @@ private:
     EspVideo* camera_ = nullptr;
     CustomBacklight *backlight_;
 
+    /** @brief 创建 I2C1 主机:挂载 ES8311/GT911/OV5647-SCCB/背光芯片, 使能上拉. */
     void InitializeCodecI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -106,6 +122,7 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
     }
 
+    /** @brief 打开 MIPI-DSI PHY 的内部 LDO 供电, 使 PHY 从无电进入待机可初始化状态. */
     static esp_err_t bsp_enable_dsi_phy_power(void) {
 #if MIPI_DSI_PHY_PWR_LDO_CHAN > 0
         // Turn on the power for MIPI DSI PHY, so it can go from "No Power" state to "Shutdown" state
@@ -298,6 +315,7 @@ private:
 #else
 #error "Unsupported LCD_TYPE"
 #endif   
+    /** @brief 初始化 GT911 触摸(I2C 地址 0x5D/0x14), 分辨率跟随 DISPLAY_W/H, 接入 LVGL. */
     void InitializeTouch()
     {
         esp_lcd_touch_handle_t tp;
@@ -338,6 +356,7 @@ private:
         lvgl_port_add_touch(&touch_cfg);
         ESP_LOGI(TAG, "Touch panel initialized successfully");
     }
+    /** @brief 初始化 OV5647 摄像头: CSI 接口, SCCB 复用 Codec I2C, 复位/掉电脚悬空. */
     void InitializeCamera() {
         esp_video_init_csi_config_t base_csi_config = {
             .sccb_config = {
@@ -355,6 +374,7 @@ private:
 
         camera_ = new EspVideo(cam_config);
     }
+    /** @brief BOOT 键: 启动期短按进 WiFi 配网, 运行期短按切换对话; 以太网版仅切换对话. */
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
@@ -374,6 +394,7 @@ private:
     }
 
 public:
+    /** @brief 整板上电装配顺序:I2C→LCD→触摸→摄像头→按键→Modbus(地址0x01)→MCP工具. */
     WaveshareEsp32p4nano() :
         boot_button_(BOOT_BUTTON_GPIO) {
         InitializeCodecI2c();
@@ -390,6 +411,7 @@ public:
         InitializeProductionMcpTools();
     }
 
+    /** @brief 取 ES8311 音频编解码器(静态单例, I2S+PA 引脚见 config.h). */
     virtual AudioCodec *GetAudioCodec() override {
         static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
                                             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
@@ -397,14 +419,17 @@ public:
         return &audio_codec;
     }
 
+    /** @brief 取牧场管理竖屏 UI 显示对象(HerdsmanLcdDisplay). */
     virtual Display *GetDisplay() override {
         return display__;
     }
 
+    /** @brief 取 CSI 摄像头, 未初始化成功时为 nullptr. */
     virtual Camera* GetCamera() override {
         return camera_;
     }
 
+    /** @brief 取 I2C 背光控制器, 上层用于开关屏/恢复亮度. */
     virtual Backlight *GetBacklight() override {
          return backlight_;
      }
