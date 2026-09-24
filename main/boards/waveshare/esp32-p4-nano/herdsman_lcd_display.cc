@@ -23,6 +23,7 @@
 
 extern "C" {
 LV_IMAGE_DECLARE(herdsman_logo);
+// LV_IMAGE_DECLARE(logo__qingdao_tsg);
 }
 
 LV_FONT_DECLARE(font_herdsman_ui_30_4);
@@ -340,6 +341,7 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
 
     lv_obj_t* logo = lv_image_create(left_panel);
     lv_image_set_src(logo, &herdsman_logo);
+    // lv_image_set_src(logo, &logo__qingdao_tsg);
     lv_obj_center(logo);
 #endif
 

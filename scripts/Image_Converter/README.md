@@ -43,3 +43,9 @@ venv\Scripts\activate      # Windows
 # 运行
 python lvgl_tools_gui.py
 ```
+
+使用命令行转换 png 图片
+```bash
+python LVGLImage.py --ofmt C --cf RGB565A8 -o ./output logo_big-herdsman.png
+python LVGLImage.py --ofmt C --cf auto -o ./output logo__qingdao_tsg.png
+```
