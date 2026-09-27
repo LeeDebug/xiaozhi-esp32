@@ -29,6 +29,62 @@ LV_IMAGE_DECLARE(herdsman_logo);
 LV_FONT_DECLARE(font_herdsman_ui_30_4);
 
 namespace {
+// 以 % 开头的 MCP / 函数调用中间态(如 "% self.production.lights.get...")不适合直接上屏.
+bool IsToolCallNoise(const char* s) {
+    if (s == nullptr || s[0] == '\0') {
+        return true;
+    }
+    while (*s == ' ' || *s == '\n' || *s == '\r' || *s == '\t') {
+        ++s;
+    }
+    if (s[0] == '%' || s[0] == '<' || s[0] == '{' || s[0] == '[') {
+        return true;
+    }
+    auto contains = [&](const char* needle) { return std::strstr(s, needle) != nullptr; };
+    if (contains("self.") || contains("self,") || contains("production.") ||
+        contains("lights.get") || contains("lights.set") || contains("mcp__") ||
+        contains("tool_call") || contains("function_call") || contains("()") ||
+        contains("```")) {
+        return true;
+    }
+    return false;
+}
+
+// 工具调用 -> 中文提示映射表: 新增功能只加一行, 按顺序优先匹配.
+// keyword 为服务端下发文本中的子串(精确工具名放前面, 泛关键词放后面).
+struct ToolCallFriendlyEntry {
+    const char* keyword;
+    const char* text;
+};
+constexpr ToolCallFriendlyEntry kToolCallFriendlyTable[] = {
+    {"silos.get_info", "正在查询料塔重量…"},
+    {"main_water_valve.get", "正在查询水阀状态…"},
+    {"main_water_valve.set", "正在控制水阀…"},
+    {"water_temperature.get", "正在查询水温…"},
+    {"water_temperature", "正在查询水温…"},
+    {"lights.get", "正在查询灯光状态…"},
+    {"lights.set", "正在控制灯光…"},
+    {"light.get", "正在查询灯光状态…"},
+    {"light_1", "正在控制灯光…"},
+    {"light_2", "正在控制灯光…"},
+    {"silo", "正在查询料塔重量…"},
+    {"temperature", "正在查询水温…"},
+    {"water_valve", "正在控制水阀…"},
+    {"valve", "正在控制水阀…"},
+    {"light", "正在查询灯光状态…"},
+    {"switch", "正在控制开关…"},
+};
+constexpr char kToolCallFriendlyFallback[] = "正在查询设备状态…";
+
+// 工具调用噪声统一转成中文提示, 避免屏幕出现英文代码.
+const char* FriendlyToolCallText(const char* s) {
+    for (const auto& entry : kToolCallFriendlyTable) {
+        if (std::strstr(s, entry.keyword) != nullptr) {
+            return entry.text;
+        }
+    }
+    return kToolCallFriendlyFallback;
+}
 
 /* ===== 主题色板本地别名:全部取自 config.h HERDSMAN_UI_COLOR_*, 切主题只需改 HERDSMAN_UI_THEME ===== */
 constexpr uint32_t kAccent = HERDSMAN_UI_COLOR_ACCENT; // 主强调:按钮/高亮/发送键
@@ -610,6 +666,15 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (content[0] == '\0') {
         return;
     }
+    const bool is_user = std::strcmp(role, "user") == 0;
+    const bool is_assistant = std::strcmp(role, "assistant") == 0;
+    const char* visible_text = content;
+    std::string friendly;
+    if (is_assistant && IsToolCallNoise(content)) {
+        friendly = FriendlyToolCallText(content);
+        visible_text = friendly.c_str();
+        // 工具调用中文提示作为 assistant 新气泡追加, 保留历史, 查多次则新增多次.
+    }
     if (standby_panel_ != nullptr) {
         lv_obj_add_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -619,8 +684,6 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
         lv_obj_del(lv_obj_get_child(chat_list_, 0));
     }
 
-    const bool is_user = std::strcmp(role, "user") == 0;
-    const bool is_assistant = std::strcmp(role, "assistant") == 0;
     lv_obj_t* row = lv_obj_create(chat_list_);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
     MakePlain(row);
@@ -669,7 +732,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_set_width(text, bubble_width - 28);
     lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(text, lv_color_hex(kText), 0);
-    lv_label_set_text(text, content);
+    lv_label_set_text(text, visible_text);
     chat_message_label_ = text;
 
     if (is_user) {
