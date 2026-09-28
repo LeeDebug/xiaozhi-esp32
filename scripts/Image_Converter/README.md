@@ -27,6 +27,7 @@ python -m venv venv
 # 激活环境
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate      # Windows
+.venv\Scripts\activate # Win 10/11
 ```
 
 安装依赖
@@ -40,6 +41,7 @@ pip install -r requirements.txt
 # 激活环境
 source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate      # Windows
+.venv\Scripts\activate # Win 10/11
 # 运行
 python lvgl_tools_gui.py
 ```
