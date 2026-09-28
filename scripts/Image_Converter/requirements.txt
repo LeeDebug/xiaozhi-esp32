@@ -1,3 +1,13 @@
-lz4==4.4.4
-Pillow==11.3.0
+# LVGL Image_Converter dependencies
+# Install: pip install -r requirements.txt
+# Note: pngquant is an optional external binary (not on PyPI):
+#   Debian/Ubuntu: sudo apt install pngquant
+#   macOS: brew install pngquant
+#   Windows: download pngquant.exe from https://pngquant.org/ and add to PATH
+
+# LVGLImage.py: PNG parsing / packing
 pypng==0.20220715.0
+# LVGLImage.py: --compress LZ4 support
+lz4==4.4.4
+# gif_to_c.py + lvgl_tools_gui.py: GIF split, resize, RGBA handling
+Pillow==11.3.0

@@ -51,3 +51,21 @@ python lvgl_tools_gui.py
 python LVGLImage.py --ofmt C --cf RGB565A8 -o ./output logo_big-herdsman.png
 python LVGLImage.py --ofmt C --cf auto -o ./output logo__qingdao_tsg.png
 ```
+
+使用命令行转换 gif 图片
+```bash
+# 最常用：黑底 RGB565，最省 Flash/RAM
+python gif_to_c.py waves.gif -o ./output_gif --cf RGB565
+
+# 带半透明辉光
+python gif_to_c.py waves.gif -o ./output_gif --cf RGB565A8
+
+# 限制尺寸 + 统一帧率
+python gif_to_c.py waves.gif -o ./output_gif --cf RGB565 --resize 320x240 --fps 20
+
+# 最高质量 / 压缩
+python gif_to_c.py waves.gif -o ./output_gif --cf ARGB8888 --compress LZ4 --dither
+
+# 批量转文件夹下所有 gif
+python gif_to_c.py ./ -o ./output_gif --cf RGB565
+```
