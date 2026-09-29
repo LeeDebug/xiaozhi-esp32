@@ -50,6 +50,9 @@ python lvgl_tools_gui.py
 ```bash
 python LVGLImage.py --ofmt C --cf RGB565A8 -o ./output logo_big-herdsman.png
 python LVGLImage.py --ofmt C --cf auto -o ./output logo__qingdao_tsg.png
+
+python -c "from PIL import Image; im=Image.open('waves_demo.png'); w,h=im.size; nw=440; im.resize((nw, round(h*nw/w))).save('waves_demo.png')"
+python LVGLImage.py --ofmt C --cf RGB565 --compress RLE --background 0x000000 -o ./output waves_demo.png
 ```
 
 使用命令行转换 gif 图片
@@ -68,4 +71,7 @@ python gif_to_c.py waves.gif -o ./output_gif --cf ARGB8888 --compress LZ4 --dith
 
 # 批量转文件夹下所有 gif
 python gif_to_c.py ./ -o ./output_gif --cf RGB565
+
+# 一步到位：RGB565（去 alpha）+ 缩到 320 + 20 帧 + RLE
+python gif_to_c.py waves_purple.gif -o ./output_gif --cf RGB565 --resize 320x320 --fps 20 --max-frames 20 --compress RLE --dither --name waves_purple
 ```
