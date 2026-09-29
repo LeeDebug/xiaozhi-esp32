@@ -23,6 +23,7 @@
 
 extern "C" {
 LV_IMAGE_DECLARE(herdsman_logo);
+LV_IMAGE_DECLARE(waves_demo);
 // LV_IMAGE_DECLARE(logo__qingdao_tsg);
 }
 
@@ -399,6 +400,15 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     lv_image_set_src(logo, &herdsman_logo);
     // lv_image_set_src(logo, &logo__qingdao_tsg);
     lv_obj_center(logo);
+    left_logo_img_ = logo;
+
+    // 对话过程中展示 waves_demo: RLE 压缩图不支持缩放, 已按左栏宽度预缩到 440 宽, 此处 1:1 显示.
+    lv_obj_t* chat_img = lv_image_create(left_panel);
+    lv_image_set_src(chat_img, &waves_demo);
+    lv_obj_center(chat_img);
+    lv_obj_add_flag(chat_img, LV_OBJ_FLAG_HIDDEN);
+    left_chat_img_ = chat_img;
+    UpdateLeftLogo();
 #endif
 
     const int left_panel_width = HERDSMAN_UI_SHOW_LEFT_LOGO ? side_column_width_ : 0;
@@ -757,6 +767,7 @@ void HerdsmanLcdDisplay::UpdateHomeState() {
     if (!setup_ui_called_ || standby_panel_ == nullptr) {
         return;
     }
+    UpdateLeftLogo();
     const auto state = Application::GetInstance().GetDeviceState();
     if (state == kDeviceStateIdle) {
         lv_obj_remove_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
@@ -780,6 +791,22 @@ void HerdsmanLcdDisplay::UpdateHomeState() {
         if (chat_button_icon_ != nullptr) {
             lv_label_set_text(chat_button_icon_, MATERIAL_SYMBOLS_STOP);
         }
+    }
+}
+
+void HerdsmanLcdDisplay::UpdateLeftLogo() {
+    if (left_logo_img_ == nullptr || left_chat_img_ == nullptr) {
+        return;
+    }
+    // 仅聆听中显示 waves_demo; 其余状态一律显示 logo.
+    const auto state = Application::GetInstance().GetDeviceState();
+    const bool chatting = (state == kDeviceStateListening);
+    if (chatting) {
+        lv_obj_add_flag(left_logo_img_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(left_chat_img_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(left_logo_img_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(left_chat_img_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

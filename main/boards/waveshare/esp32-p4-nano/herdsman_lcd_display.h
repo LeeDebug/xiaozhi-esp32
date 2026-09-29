@@ -51,6 +51,8 @@ private:
     lv_obj_t* volume_slider_ = nullptr;
     lv_obj_t* brightness_value_label_ = nullptr;
     lv_obj_t* volume_value_label_ = nullptr;
+    lv_obj_t* left_logo_img_ = nullptr;
+    lv_obj_t* left_chat_img_ = nullptr;
 
     void CreateTopBar(lv_obj_t* parent);
     void CreateHomeContent(lv_obj_t* parent);
@@ -58,6 +60,7 @@ private:
     void CreateSettingsPanel(lv_obj_t* parent);
     void UpdateColumnWidths();
     void UpdateHomeState();
+    void UpdateLeftLogo();
     void UpdateDateTime();
     void UpdateSignalStrength();
     void UpdateSettingsTime();
