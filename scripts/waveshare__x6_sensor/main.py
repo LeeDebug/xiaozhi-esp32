@@ -258,6 +258,9 @@ class App:
         self.worker = None
         self.port_map = {}
         self._poll_var = tk.BooleanVar(value=False)
+        self.current_iaq = None
+        self._level_color = FG_DIM
+        self._iaq_win = None
 
         root.title("Environment X6 Sensor · 全 API 调试工具  (微雪 SKU 34169)")
         root.geometry("1280x860")
@@ -289,6 +292,10 @@ class App:
                      font=FONT_B)
         st.configure("TLabel", background=CARD_BG, foreground=FG)
         st.configure("Head.TLabel", background=CARD_BG, foreground=FG_DIM, font=FONT)
+        st.configure("Unit.TLabel", background=CARD_BG, foreground="#9aa1ac",
+                     font=("Microsoft YaHei UI", 8))
+        st.configure("Hint.TLabel", background=CARD_BG, foreground=C_ACCENT,
+                     font=("Microsoft YaHei UI", 8, "underline"))
         st.configure("TButton", padding=(10, 5))
         st.configure("Accent.TButton", padding=(10, 5))
         st.map("Accent.TButton", background=[("active", "#1d4ed8"), ("!disabled", C_ACCENT)],
@@ -514,36 +521,114 @@ class App:
         card = ttk.Frame(box, style="Card.TFrame", padding=(12, 10))
         card.pack(fill="x")
 
-        ttk.Label(card, text="实时数值", font=FONT_H, background=CARD_BG).grid(
-            row=0, column=0, sticky="w", padx=(0, 16))
+        head = ttk.Frame(card, style="Card.TFrame")
+        head.grid(row=0, column=0, sticky="w", padx=(0, 14))
+        ttk.Label(head, text="实时数值", font=FONT_H, background=CARD_BG).pack(anchor="w")
+        ttk.Label(head, text="REAL-TIME", style="Unit.TLabel").pack(anchor="w")
 
+        # 每格：第一行 中文 + 单位，第二行 英文，第三行 数值
         self.val_vars = {}
         specs = [
-            ("iaq", "IAQ", "—", 190),
-            ("tvoc", "TVOC (ppm)", "—", 150),
-            ("hcho", "HCHO (ppm)", "—", 150),
-            ("co", "CO (ppm)", "—", 150),
-            ("temp", "温度 (℃)", "—", 130),
-            ("hum", "湿度 (%RH)", "—", 140),
+            ("iaq",  "空气质量指数",    "IAQ"),
+            ("tvoc", "总挥发物 (ppm)",  "TVOC"),
+            ("hcho", "甲醛 (ppm)",      "HCHO"),
+            ("co",   "一氧化碳 (ppm)",  "CO"),
+            ("temp", "温度 (℃)",       "TEMP"),
+            ("hum",  "湿度 (%RH)",      "RH"),
         ]
-        for i, (key, label, init, w) in enumerate(specs, start=1):
+        for i, (key, cn, en) in enumerate(specs, start=1):
             cell = ttk.Frame(card, style="Card.TFrame")
-            cell.grid(row=0, column=i, padx=6, sticky="w")
-            ttk.Label(cell, text=label, style="Head.TLabel").pack(anchor="w")
-            v = tk.StringVar(value=init)
+            cell.grid(row=0, column=i, padx=7, sticky="w")
+            ttk.Label(cell, text=cn, style="Head.TLabel").pack(anchor="w")
+            ttk.Label(cell, text=en, style="Unit.TLabel").pack(anchor="w")
+            v = tk.StringVar(value="—")
             tk.Label(cell, textvariable=v, font=FONT_BIG, fg=FG,
                      bg=CARD_BG).pack(anchor="w")
             self.val_vars[key] = v
 
+        # IAQ 等级（点击查看详细说明）
+        lvl_cell = ttk.Frame(card, style="Card.TFrame")
+        lvl_cell.grid(row=0, column=len(specs) + 1, padx=(12, 0), sticky="w")
+        ttk.Label(lvl_cell, text="空气质量等级", style="Head.TLabel").pack(anchor="w")
+        ttk.Label(lvl_cell, text="IAQ LEVEL", style="Unit.TLabel").pack(anchor="w")
         self.level_var = tk.StringVar(value="—")
-        self.level_lbl = tk.Label(card, textvariable=self.level_var, font=FONT_B,
-                                  fg=FG_DIM, bg=CARD_BG, padx=10, pady=4)
-        self.level_lbl.grid(row=0, column=len(specs) + 1, padx=(10, 0))
+        self.level_lbl = tk.Label(lvl_cell, textvariable=self.level_var, font=FONT_B,
+                                  fg=FG_DIM, bg=CARD_BG, cursor="hand2")
+        self.level_lbl.pack(anchor="w")
+        self.level_lbl.bind("<Button-1>", lambda e: self.show_iaq_help())
+        hint = tk.Label(lvl_cell, text="点击查看等级说明 ▾", font=("Microsoft YaHei UI", 8),
+                        fg=C_ACCENT, bg=CARD_BG, cursor="hand2")
+        hint.pack(anchor="w")
+        for w in (self.level_lbl, hint):
+            w.bind("<Enter>", lambda e, wgt=w: wgt.configure(fg=C_ACCENT))
+            w.bind("<Leave>", lambda e, wgt=w: wgt.configure(
+                fg=C_ACCENT if wgt is hint else self._level_color))
 
         self.extra_var = tk.StringVar(value="")
         ttk.Label(card, textvariable=self.extra_var, style="Head.TLabel",
                   wraplength=440, justify="left").grid(
             row=1, column=1, columnspan=len(specs) + 1, sticky="w", pady=(8, 0))
+
+    # ---------------------------------------------------------- IAQ 等级说明
+    def show_iaq_help(self):
+        old = getattr(self, "_iaq_win", None)
+        if old is not None and old.winfo_exists():
+            old.destroy()
+            self._iaq_win = None
+            return
+
+        win = tk.Toplevel(self.root)
+        self._iaq_win = win
+        win.title("IAQ 等级说明（EPA 标准）")
+        win.configure(bg=CARD_BG)
+        win.transient(self.root)
+        win.resizable(False, False)
+
+        x = max(40, self.level_lbl.winfo_rootx() - 470)
+        y = self.level_lbl.winfo_rooty() + 28
+        win.geometry("+%d+%d" % (x, y))
+
+        wrap = ttk.Frame(win, style="Card.TFrame", padding=(16, 12))
+        wrap.pack(fill="both", expand=True)
+
+        ttk.Label(wrap, text="IAQ（室内空气质量指数）等级对照表",
+                  font=FONT_H, background=CARD_BG).pack(anchor="w", pady=(0, 2))
+        ttk.Label(wrap, text="等级划分遵循 EPA 标准，数值越低空气质量越好。",
+                  style="Head.TLabel").pack(anchor="w", pady=(0, 10))
+
+        grid = ttk.Frame(wrap, style="Card.TFrame")
+        grid.pack(fill="x")
+        heads = [("IAQ 范围", 10, "center"), ("等级", 20, "w"), ("含义与建议", 62, "w")]
+        for c, (t, w, anch) in enumerate(heads):
+            tk.Label(grid, text=t, font=FONT_B, fg=FG_DIM, bg=CARD_BG,
+                     width=w, anchor=anch).grid(row=0, column=c, sticky="w", pady=(0, 6))
+
+        cur = getattr(self, "current_iaq", None)
+        cur_row = x6.iaq_guide_index(cur) if cur is not None else None
+
+        for i, (lo, hi, name, color, advice) in enumerate(x6.IAQ_GUIDE):
+            rng = "%d – %d" % (lo, hi) if hi is not None else "> %d" % lo
+            mark = "◀ 当前" if i == cur_row else ""
+            row_bg = "#eef4ff" if i == cur_row else CARD_BG
+            tk.Label(grid, text=rng, font=FONT_MONO, fg=FG, bg=row_bg,
+                     width=10, anchor="center").grid(row=i + 1, column=0, sticky="w")
+            tk.Label(grid, text=name + (" " + mark if mark else ""), font=FONT_B,
+                     fg=color, bg=row_bg, width=20, anchor="w").grid(
+                row=i + 1, column=1, sticky="w")
+            tk.Label(grid, text=advice, font=FONT, fg=FG, bg=row_bg,
+                     width=62, anchor="w", wraplength=430,
+                     justify="left").grid(row=i + 1, column=2, sticky="w", pady=2)
+
+        ttk.Separator(wrap).pack(fill="x", pady=(10, 8))
+        foot = ttk.Frame(wrap, style="Card.TFrame")
+        foot.pack(fill="x")
+        if cur is not None:
+            lvl, color = x6.iaq_level(cur)
+            tk.Label(foot, text="当前读数 IAQ %.1f → %s" % (cur, lvl),
+                     font=FONT_B, fg=color, bg=CARD_BG).pack(side="left")
+        ttk.Button(foot, text="关闭", command=win.destroy).pack(side="right")
+
+        win.bind("<Escape>", lambda e: win.destroy())
 
     def _build_status(self):
         bar = ttk.Frame(self.root, padding=(10, 0))
@@ -800,8 +885,10 @@ class App:
             self.val_vars["temp"].set("%.2f" % v["temp"])
             self.val_vars["hum"].set("%.2f" % v["hum"])
             lvl, color = x6.iaq_level(v["iaq"])
-            self.level_var.set("IAQ 等级：%s" % lvl)
+            self.level_var.set(lvl)
             self.level_lbl.configure(fg=color)
+            self._level_color = color
+            self.current_iaq = v["iaq"]
 
             fh = getattr(self, "csv_fh", None)
             if fh:
