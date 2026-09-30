@@ -75,6 +75,19 @@ def now_str():
     return datetime.now().strftime("%H:%M:%S.") + "%03d" % (datetime.now().microsecond // 1000)
 
 
+def center_window(win, width=None, height=None):
+    """把窗口放到屏幕正中间（宽高缺省时用窗口自身请求尺寸）。"""
+    win.update_idletasks()
+    w = width or max(win.winfo_reqwidth(), 1)
+    h = height or max(win.winfo_reqheight(), 1)
+    sw = win.winfo_screenwidth()
+    sh = win.winfo_screenheight()
+    x = max(0, (sw - w) // 2)
+    y = max(0, (sh - h) // 2 - 20)   # 稍微上提一点，视觉更居中
+    win.geometry("%dx%d+%d+%d" % (w, h, x, y) if width and height
+                 else "+%d+%d" % (x, y))
+
+
 def list_serial_ports():
     """枚举本机串口，返回 [(device, description), ...]"""
     out = []
@@ -292,7 +305,7 @@ class App:
         self._save_warned = False
 
         root.title("Environment X6 Sensor · 全 API 调试工具  (微雪 SKU 34169)")
-        root.geometry("1280x860")
+        center_window(root, 1280, 860)
         root.configure(bg=BG)
         root.minsize(1060, 700)
 
@@ -613,10 +626,7 @@ class App:
         win.configure(bg=CARD_BG)
         win.transient(self.root)
         win.resizable(False, False)
-
-        x = max(40, self.level_lbl.winfo_rootx() - 470)
-        y = self.level_lbl.winfo_rooty() + 28
-        win.geometry("+%d+%d" % (x, y))
+        win.withdraw()                       # 先隐藏，等布局算完再居中显示
 
         wrap = ttk.Frame(win, style="Card.TFrame", padding=(16, 12))
         wrap.pack(fill="both", expand=True)
@@ -659,6 +669,10 @@ class App:
         ttk.Button(foot, text="关闭", command=win.destroy).pack(side="right")
 
         win.bind("<Escape>", lambda e: win.destroy())
+        center_window(win)                   # 内容布局完成后，屏幕正中间显示
+        win.deiconify()
+        win.lift()
+        win.focus_set()
 
     def _build_status(self):
         bar = ttk.Frame(self.root, padding=(10, 0))
