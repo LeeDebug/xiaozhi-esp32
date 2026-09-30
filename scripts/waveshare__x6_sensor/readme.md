@@ -12,6 +12,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
+| `run.bat` | Windows 一键启动脚本：激活 `.venv` 后运行 `python main.py`（双击即可） |
 | `main.py` | GUI 主程序（端口选择 + 8 个 API 测试卡片 + 实时日志 + 数值面板） |
 | `x6_protocol.py` | 协议模块：0-add8 校验、8 条指令的组帧 / 解帧 / 中文解析，可直接命令行自测 |
 | `pyproject.toml` | uv 项目配置与依赖声明 |
@@ -102,6 +103,20 @@ python -c "import serial, tkinter; print('OK', serial.__version__)"
 ---
 
 ## 三、启动
+
+### Windows：双击 `run.bat`（最简单）
+
+根目录的 **`run.bat`** 会自动：
+
+1. `cd` 到脚本所在目录
+2. `call .venv\Scripts\activate.bat` 激活 uv 虚拟环境
+   （若 `.venv` 还不存在，会先自动执行 `uv sync` 初始化）
+3. `python main.py` 启动图形界面
+
+正常退出（点界面右上角 × 关闭程序）后，cmd 窗口会**自动关闭**；
+若程序报错退出，窗口会保留并提示「按任意键关闭」，方便查看错误信息。
+
+### 命令行启动
 
 ```bash
 uv run main.py
