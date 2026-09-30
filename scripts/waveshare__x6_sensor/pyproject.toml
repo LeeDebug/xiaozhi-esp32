@@ -1,0 +1,18 @@
+[project]
+name = "waveshare-x6-sensor"
+version = "0.2.0"
+description = "微雪 Environment X6 Sensor 串口协议全 API 图形化调试工具"
+readme = "readme.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyserial>=3.5",
+]
+
+[tool.uv]
+# 本项目只是脚本集合，不需要打包安装
+package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
