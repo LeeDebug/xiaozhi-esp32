@@ -55,9 +55,10 @@ C_ACCENT  = "#2563eb"
 DATA_DIR       = "data"
 DATA_FILE_FMT  = "x6_log_%s.xlsx"                     # %s = YYYY-MM-DD
 DATA_TITLE_FMT = "翊燊科技 环境监测系统 日志记录 %s"   # 标题日期与文件名一致
-DATA_HEADERS   = ["时间", "IAQ", "IAQ等级", "TVOC_ppm",
-                  "HCHO_ppm", "CO_ppm", "温度C", "湿度RH"]
-DATA_WIDTHS    = [21, 9, 18, 11, 11, 11, 10, 10]      # 时间 / IAQ等级 加宽
+DATA_HEADERS   = ["时间 TIME", "空气质量指数 IAQ", "空气质量等级 LEVEL",
+                  "总挥发物 (ppm) TVOC", "甲醛 (ppm) HCHO", "一氧化碳 (ppm) CO",
+                  "温度 (℃) TEMP", "湿度 (%RH) RH"]
+DATA_WIDTHS    = [21, 17, 15, 19, 16, 18, 14, 14]      # 时间 / 中文表头列加宽
 DATA_NUM_FMT   = {2: "0.0", 4: "0.0000", 5: "0.0000",
                   6: "0.0000", 7: "0.00", 8: "0.00"}
 DATA_FLUSH_ROWS  = 20    # 累计多少行落盘一次
@@ -841,6 +842,7 @@ class App:
                 wb = load_workbook(path)
                 ws = wb.active
                 mode = "追加"
+                self._build_sheet(ws, today)               # 顺带把旧表头迁移成新格式
             else:
                 wb, ws = Workbook(), None
                 ws = wb.active
@@ -858,7 +860,9 @@ class App:
             self._emit("err", "无法创建记录文件：%s" % e)
 
     def _build_sheet(self, ws, date_str):
-        ws.merge_cells("A1:H1")
+        """写入/刷新标题行 + 表头行 + 列宽。对旧格式文件重复调用即可迁移。"""
+        if "A1:H1" not in [str(r) for r in ws.merged_cells.ranges]:
+            ws.merge_cells("A1:H1")
         t = ws.cell(row=1, column=1, value=DATA_TITLE_FMT % date_str)
         t.font = Font(bold=True, size=14)
         t.alignment = Alignment(horizontal="center", vertical="center")
