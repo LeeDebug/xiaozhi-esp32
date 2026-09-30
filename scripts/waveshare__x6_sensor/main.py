@@ -12,6 +12,7 @@ Environment X6 Sensor（微雪 SKU 34169）全 API 图形化调试工具
 """
 
 import argparse
+import os
 import queue
 import sys
 import threading
@@ -25,6 +26,14 @@ try:
     from serial.tools import list_ports
 except ImportError:
     sys.exit("缺少 pyserial，请先在项目目录执行：uv sync")
+
+try:
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
 
 import x6_protocol as x6
 
@@ -41,6 +50,18 @@ C_ERR     = "#c0392b"   # 错误 红
 C_INFO    = "#6b7280"   # 信息 灰
 C_OK      = "#0a7d45"
 C_ACCENT  = "#2563eb"
+
+# ---- 数据存档（xlsx）----
+DATA_DIR       = "data"
+DATA_FILE_FMT  = "x6_log_%s.xlsx"                     # %s = YYYY-MM-DD
+DATA_TITLE_FMT = "翊燊科技 环境监测系统 日志记录 %s"   # 标题日期与文件名一致
+DATA_HEADERS   = ["时间", "IAQ", "IAQ等级", "TVOC_ppm",
+                  "HCHO_ppm", "CO_ppm", "温度C", "湿度RH"]
+DATA_WIDTHS    = [21, 9, 18, 11, 11, 11, 10, 10]      # 时间 / IAQ等级 加宽
+DATA_NUM_FMT   = {2: "0.0", 4: "0.0000", 5: "0.0000",
+                  6: "0.0000", 7: "0.00", 8: "0.00"}
+DATA_FLUSH_ROWS  = 20    # 累计多少行落盘一次
+DATA_FLUSH_SECS  = 30.0  # 或隔多少秒落盘一次
 
 FONT      = ("Microsoft YaHei UI", 9)
 FONT_B    = ("Microsoft YaHei UI", 9, "bold")
@@ -261,6 +282,13 @@ class App:
         self.current_iaq = None
         self._level_color = FG_DIM
         self._iaq_win = None
+        self.wb = None            # openpyxl Workbook（按天一个文件）
+        self.ws = None
+        self.data_date = None     # 当前存档对应的日期
+        self.data_path = None
+        self._pending_rows = 0
+        self._last_save = 0.0
+        self._save_warned = False
 
         root.title("Environment X6 Sensor · 全 API 调试工具  (微雪 SKU 34169)")
         root.geometry("1280x860")
@@ -274,7 +302,7 @@ class App:
         self._build_status()
 
         self.refresh_ports(select=preset_port)
-        self.root.after(80, self._drain_log)
+        self._after_id = root.after(80, self._drain_log)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ---------------------------------------------------------- 样式
@@ -441,8 +469,9 @@ class App:
                     textvariable=self.interval_var, format="%.1f").pack(side="left")
         ttk.Label(row, text="秒", background=CARD_BG).pack(side="left", padx=(2, 0))
 
-        self.csv_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row, text="同时记录 CSV", variable=self.csv_var,
+        self.csv_var = tk.BooleanVar(value=True)   # 默认开启记录
+        ttk.Checkbutton(row, text="同时记录（data/ 目录按天存档）",
+                        variable=self.csv_var,
                         command=self._toggle_csv).pack(side="left", padx=(14, 0))
         return f
 
@@ -784,35 +813,116 @@ class App:
             self.poll_btn.configure(text="停止连续采集")
             self.status_var.set("连续采集进行中：每 %.1f 秒查询一次 0x70" % itv)
 
-    # ---------------------------------------------------------- CSV
+    # ---------------------------------------------------------- 数据存档（xlsx，按天）
     def _toggle_csv(self):
         if self.csv_var.get():
-            path = filedialog.asksaveasfilename(
-                defaultextension=".csv", filetypes=[("CSV 文件", "*.csv")],
-                initialfile="x6_log.csv", title="选择 CSV 保存位置")
-            if not path:
-                self.csv_var.set(False)
-                return
-            try:
-                self.csv_fh = open(path, "w", encoding="utf-8-sig", newline="")
-                self.csv_fh.write("时间,IAQ,IAQ等级,TVOC_ppm,HCHO_ppm,CO_ppm,温度C,湿度RH\n")
-                self.csv_path = path
-                self.status_var.set("CSV 记录中：%s" % path)
-            except OSError as e:
-                self.csv_var.set(False)
-                messagebox.showerror("无法写入 CSV", str(e))
+            self._ensure_recording()
         else:
             self._close_csv()
+            self.status_var.set("已停止记录数据")
+
+    def _ensure_recording(self):
+        """确保有当天的存档文件；跨天自动切换到新文件（追加到同名文件）。"""
+        if not HAS_OPENPYXL:
+            if not self._save_warned:
+                self._save_warned = True
+                self._emit("err", "缺少 openpyxl，无法记录数据，请执行：uv sync")
+            return
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self.wb is not None and self.data_date == today:
+            return
+        if self.wb is not None:            # 跨天：先把旧的落盘
+            self._close_csv()
+
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            path = os.path.join(DATA_DIR, DATA_FILE_FMT % today)
+            if os.path.exists(path):                       # 同一天已有 → 追加
+                wb = load_workbook(path)
+                ws = wb.active
+                mode = "追加"
+            else:
+                wb, ws = Workbook(), None
+                ws = wb.active
+                ws.title = "环境监测日志"
+                self._build_sheet(ws, today)
+                mode = "新建"
+            self.wb, self.ws = wb, ws
+            self.data_date = today
+            self.data_path = path
+            self._pending_rows = 0
+            self._flush(force=True)
+            self._emit("info", "开始记录数据（%s）：%s" % (mode, path))
+        except Exception as e:
+            self.wb = self.ws = None
+            self._emit("err", "无法创建记录文件：%s" % e)
+
+    def _build_sheet(self, ws, date_str):
+        ws.merge_cells("A1:H1")
+        t = ws.cell(row=1, column=1, value=DATA_TITLE_FMT % date_str)
+        t.font = Font(bold=True, size=14)
+        t.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 24
+
+        head_fill = PatternFill("solid", fgColor="D9E1F2")
+        for i, h in enumerate(DATA_HEADERS, start=1):
+            c = ws.cell(row=2, column=i, value=h)
+            c.font = Font(bold=True)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.fill = head_fill
+        ws.row_dimensions[2].height = 20
+
+        for i, w in enumerate(DATA_WIDTHS, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        ws.freeze_panes = "A3"
+
+    def _record(self, v, lvl):
+        """追加一行读数；攒够 DATA_FLUSH_ROWS 或隔 DATA_FLUSH_SECS 秒落盘一次。"""
+        self._ensure_recording()
+        if self.ws is None:
+            return
+        self.ws.append([
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            round(v["iaq"], 1), lvl,
+            round(v["tvoc"], 4), round(v["hcho"], 4), round(v["co"], 4),
+            round(v["temp"], 2), round(v["hum"], 2),
+        ])
+        r = self.ws.max_row
+        for col in range(1, len(DATA_HEADERS) + 1):
+            c = self.ws.cell(row=r, column=col)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            if col in DATA_NUM_FMT:
+                c.number_format = DATA_NUM_FMT[col]
+        self._pending_rows += 1
+        if (self._pending_rows >= DATA_FLUSH_ROWS
+                or time.time() - self._last_save >= DATA_FLUSH_SECS):
+            self._flush()
+
+    def _flush(self, force=False):
+        """把内存里的工作簿写回磁盘。文件被 Excel 占用时稍后自动重试。"""
+        if self.wb is None:
+            return
+        if not force and self._pending_rows == 0:
+            return
+        try:
+            self.wb.save(self.data_path)
+            self._pending_rows = 0
+            self._last_save = time.time()
+            self._save_warned = False
+        except PermissionError:
+            if not self._save_warned:          # 只提示一次，之后静默重试
+                self._save_warned = True
+                self._emit("err", "记录文件被占用（可能正用 Excel 打开），"
+                                  "数据仍在内存中，关闭 Excel 后会自动写入：%s" % self.data_path)
+        except Exception as e:
+            self._emit("err", "写入记录文件失败：%s" % e)
 
     def _close_csv(self):
-        if getattr(self, "csv_fh", None):
-            try:
-                self.csv_fh.close()
-                self.status_var.set("CSV 已保存：%s" % getattr(self, "csv_path", ""))
-            except Exception:
-                pass
-        self.csv_fh = None
-        self.csv_var.set(False)
+        self._flush(force=True)
+        self.wb = None
+        self.ws = None
+        self.data_date = None
+        self._pending_rows = 0
 
     # ---------------------------------------------------------- 日志
     def _emit(self, kind, title, hexs=None, lines=None):
@@ -826,7 +936,7 @@ class App:
                 self._render(item)
         except queue.Empty:
             pass
-        self.root.after(80, self._drain_log)
+        self._after_id = self.root.after(80, self._drain_log)
 
     def _render(self, it):
         kind = it.get("kind")
@@ -889,17 +999,8 @@ class App:
             self.level_lbl.configure(fg=color)
             self._level_color = color
             self.current_iaq = v["iaq"]
-
-            fh = getattr(self, "csv_fh", None)
-            if fh:
-                try:
-                    fh.write("%s,%.1f,%s,%.4f,%.4f,%.4f,%.2f,%.2f\n" % (
-                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        v["iaq"], lvl, v["tvoc"], v["hcho"], v["co"],
-                        v["temp"], v["hum"]))
-                    fh.flush()
-                except Exception:
-                    self._close_csv()
+            if self.csv_var.get():
+                self._record(v, lvl)
 
         extra = []
         if v.get("sn"):
@@ -934,6 +1035,11 @@ class App:
             self.worker.stop()
             self.worker.join(timeout=2)
         self._close_csv()
+        try:
+            if getattr(self, "_after_id", None):
+                self.root.after_cancel(self._after_id)
+        except Exception:
+            pass
         self.root.destroy()
 
 
