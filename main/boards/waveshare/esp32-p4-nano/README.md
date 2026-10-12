@@ -56,3 +56,44 @@ Only TX and RX are configured. The external RS485 transceiver must provide autom
 | [7-DSI-TOUCH-A](https://www.waveshare.com/7-dsi-touch-a.htm) <br/><img style="width: 150px; height: auto; display: block; margin: 0 auto;" src="https://www.waveshare.com/media/catalog/product/cache/1/image/800x800/9df78eab33525d08d6e5fb8d27136e95/7/-/7-dsi-touch-a-1.jpg"> | [waveshare/esp_lcd_ili9881c](https://github.com/waveshareteam/waveshare-ESP32-components/tree/master/display/lcd/esp_lcd_ili9881c)    | 🕒      |
 
 </details>
+
+
+## Herdsman LCD dashboard
+
+The existing MIPI display rotation provides a landscape dashboard (1920 x 480
+for OTA7290B, 1280 x 800 for JD9365). The top bar shows the transparent brand
+logo on the left and the settings button on the right. The clock is right-aligned
+to the left of the Wi-Fi, battery, mute, and settings slots, separate from status text. The home content uses
+20% / 50% / 30% columns for the audio meter, conversation, and production chart.
+The legacy `HERDSMAN_UI_SHOW_LEFT_LOGO` and `HERDSMAN_UI_SHOW_RIGHT_BUTTONS`
+switches now control the audio/control column and production chart respectively.
+
+The 33 orange bars keep a fixed waveform silhouette. Their heights scale together
+with microphone amplitude, or playback PCM amplitude while speaking. A board-local
+ES8311 subclass publishes mean absolute PCM levels through atomics; the LVGL timer
+consumes them at 40 Hz with a fast attack and smooth decay. The sound-driven height
+variation has 2x visual gain, with a shared limit to preserve the silhouette and
+keep it clear of the chat button. This is a decorative
+amplitude meter, not a frequency spectrum or calibrated sound-pressure meter.
+It allocates no audio buffers and never reads the microphone from the UI thread.
+
+The chart uses seven fixed demo samples labelled “模拟数据”. Feed (blue, 0–1500 kg)
+and water (purple, 0–200 L) have scales on the left; eggs (green, 0–2500 pcs) have a
+scale on the right. Each series is normalized to its own range before plotting,
+so equal heights indicate equal fractions of their ranges, not equal quantities.
+The horizontal labels 1–7 represent demo sample numbers. These values are not
+connected to Modbus. For operational comparisons, separate stacked charts sharing
+a time axis would make the different units easier to interpret.
+
+Regenerate the ARGB8888 logo with its original alpha channel:
+
+```powershell
+python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/boards/waveshare/esp32-p4-nano/assets main/boards/waveshare/esp32-p4-nano/resources/logo.png
+```
+
+For this firmware's include layout, use `"lvgl.h"` in the generated C file's
+`LV_BUILD_TEST` include branch as well. Board Kconfig selects the chart widget
+and Montserrat 14 tick font; no generated sdkconfig should be edited by hand.
+Hardware checks: logo transparency, ruler alignment on both LCD sizes, settings
+and chat touch targets, microphone/playback response, silence decay, interruption,
+and reconnection. A build alone does not validate those behaviors.

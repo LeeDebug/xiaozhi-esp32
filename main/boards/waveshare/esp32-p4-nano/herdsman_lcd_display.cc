@@ -1,9 +1,10 @@
 /**
  * @file herdsman_lcd_display.cc
  * @brief HerdsmanLcdDisplay 实现: LVGL 顶栏/三栏主页/待机问题/设置页/聊天气泡.
- * 配色 kAccent 等取自 config.h 色板; 右栏按钮受 HERDSMAN_UI_SHOW_* 裁剪内容区.
+ * 配色 kAccent 等取自 config.h 色板; 左右栏受 HERDSMAN_UI_SHOW_* 裁剪内容区.
  */
 #include "herdsman_lcd_display.h"
+#include "herdsman_audio_meter.h"
 
 #include "application.h"
 #include "assets.h"
@@ -22,8 +23,7 @@
 #include <ctime>
 
 extern "C" {
-LV_IMAGE_DECLARE(herdsman_logo);
-// LV_IMAGE_DECLARE(logo__qingdao_tsg);
+LV_IMAGE_DECLARE(logo);
 }
 
 LV_FONT_DECLARE(font_herdsman_ui_30_4);
@@ -43,8 +43,7 @@ bool IsToolCallNoise(const char* s) {
     auto contains = [&](const char* needle) { return std::strstr(s, needle) != nullptr; };
     if (contains("self.") || contains("self,") || contains("production.") ||
         contains("lights.get") || contains("lights.set") || contains("mcp__") ||
-        contains("tool_call") || contains("function_call") || contains("()") ||
-        contains("```")) {
+        contains("tool_call") || contains("function_call") || contains("()") || contains("```")) {
         return true;
     }
     return false;
@@ -86,26 +85,28 @@ const char* FriendlyToolCallText(const char* s) {
     return kToolCallFriendlyFallback;
 }
 
-/* ===== 主题色板本地别名:全部取自 config.h HERDSMAN_UI_COLOR_*, 切主题只需改 HERDSMAN_UI_THEME ===== */
-constexpr uint32_t kAccent = HERDSMAN_UI_COLOR_ACCENT; // 主强调:按钮/高亮/发送键
-constexpr uint32_t kAccentPressed = HERDSMAN_UI_COLOR_ACCENT_PRESSED; // 按压态强调
-constexpr uint32_t kOnAccent = HERDSMAN_UI_COLOR_ON_ACCENT; // 强调色上白字/白图标
-constexpr uint32_t kText = HERDSMAN_UI_COLOR_TEXT; // 主文字
-constexpr uint32_t kMutedText = HERDSMAN_UI_COLOR_MUTED_TEXT; // 次要文字/占位/时间
-constexpr uint32_t kIcon = HERDSMAN_UI_COLOR_ICON; // 图标色
-constexpr uint32_t kPageBackground = HERDSMAN_UI_COLOR_PAGE; // 页面底
-constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD; // 卡片底
-constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER; // 卡片边框
-constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER; // 分割线
-constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW; // 阴影
-constexpr uint32_t kUserBubble = HERDSMAN_UI_COLOR_USER_BUBBLE; // 用户聊天气泡
-constexpr uint32_t kAssistantBubble = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE; // 助手气泡
-constexpr uint32_t kSystemBubble = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE; // 系统提示气泡
-constexpr uint32_t kAssistantAvatarBackground = HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG; // 助手头像底
-constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG; // 用户头像底
-constexpr uint32_t kUserAvatarForeground = HERDSMAN_UI_COLOR_USER_AVATAR_FG; // 用户头像字
-constexpr uint32_t kSuccess = HERDSMAN_UI_COLOR_SUCCESS; // 成功绿(在线/联网)
-constexpr uint32_t kDanger = HERDSMAN_UI_COLOR_DANGER; // 危险红(错误/离线)
+/* ===== 主题色板本地别名:全部取自 config.h HERDSMAN_UI_COLOR_*, 切主题只需改 HERDSMAN_UI_THEME
+ * ===== */
+constexpr uint32_t kAccent = HERDSMAN_UI_COLOR_ACCENT;                 // 主强调:按钮/高亮/发送键
+constexpr uint32_t kAccentPressed = HERDSMAN_UI_COLOR_ACCENT_PRESSED;  // 按压态强调
+constexpr uint32_t kOnAccent = HERDSMAN_UI_COLOR_ON_ACCENT;            // 强调色上白字/白图标
+constexpr uint32_t kText = HERDSMAN_UI_COLOR_TEXT;                     // 主文字
+constexpr uint32_t kMutedText = HERDSMAN_UI_COLOR_MUTED_TEXT;          // 次要文字/占位/时间
+constexpr uint32_t kIcon = HERDSMAN_UI_COLOR_ICON;                     // 图标色
+constexpr uint32_t kPageBackground = HERDSMAN_UI_COLOR_PAGE;           // 页面底
+constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD;           // 卡片底
+constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER;        // 卡片边框
+constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER;               // 分割线
+constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW;                 // 阴影
+constexpr uint32_t kUserBubble = HERDSMAN_UI_COLOR_USER_BUBBLE;        // 用户聊天气泡
+constexpr uint32_t kAssistantBubble = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE;  // 助手气泡
+constexpr uint32_t kSystemBubble = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE;        // 系统提示气泡
+constexpr uint32_t kAssistantAvatarBackground =
+    HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG;                                    // 助手头像底
+constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG;  // 用户头像底
+constexpr uint32_t kUserAvatarForeground = HERDSMAN_UI_COLOR_USER_AVATAR_FG;  // 用户头像字
+constexpr uint32_t kSuccess = HERDSMAN_UI_COLOR_SUCCESS;                      // 成功绿(在线/联网)
+constexpr uint32_t kDanger = HERDSMAN_UI_COLOR_DANGER;                        // 危险红(错误/离线)
 
 /** @brief 去卡片化:清边框/内边距/背景透明并关滚动条, 用于顶栏图标等裸控件. */
 void MakePlain(lv_obj_t* object) {
@@ -128,8 +129,8 @@ void StyleCard(lv_obj_t* object, int radius) {
     lv_obj_set_style_shadow_offset_y(object, 6, 0);
 }
 
-#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
-/** @brief 右栏图标+文字按钮:filled=实心强调底/白字, 否则白底描边; 点击回调经 user_data 回传. */
+#if HERDSMAN_UI_SHOW_LEFT_LOGO
+/** @brief 左栏图标+文字按钮:filled=实心强调底/白字, 否则白底描边; 点击回调经 user_data 回传. */
 lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* text,
                                const lv_font_t* text_font, const lv_font_t* icon_font, bool filled,
                                int width, lv_event_cb_t callback, void* user_data) {
@@ -159,8 +160,8 @@ lv_obj_t* CreateIconTextButton(lv_obj_t* parent, const char* icon, const char* t
 
     lv_obj_t* text_label = lv_label_create(button);
     lv_obj_set_style_text_font(text_label, text_font, 0);
-    lv_obj_set_style_text_color(text_label,
-                                filled ? lv_color_hex(kOnAccent) : lv_color_hex(kText), 0);
+    lv_obj_set_style_text_color(text_label, filled ? lv_color_hex(kOnAccent) : lv_color_hex(kText),
+                                0);
     lv_label_set_text(text_label, text);
     return button;
 }
@@ -230,6 +231,13 @@ HerdsmanLcdDisplay::HerdsmanLcdDisplay(esp_lcd_panel_io_handle_t panel_io,
     }
 }
 
+HerdsmanLcdDisplay::~HerdsmanLcdDisplay() {
+    DisplayLockGuard lock(this);
+    if (audio_meter_timer_ != nullptr) {
+        lv_timer_delete(audio_meter_timer_);
+    }
+}
+
 void HerdsmanLcdDisplay::SetupUI() {
     if (setup_ui_called_) {
         return;
@@ -277,6 +285,11 @@ void HerdsmanLcdDisplay::SetupUI() {
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 
+    audio_meter_timer_ = lv_timer_create(
+        [](lv_timer_t* timer) {
+            static_cast<HerdsmanLcdDisplay*>(lv_timer_get_user_data(timer))->UpdateAudioMeter();
+        },
+        25, this);
     UpdateDateTime();
     UpdateSignalStrength();
     UpdateHomeState();
@@ -295,16 +308,28 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_style_pad_all(top_bar_, 0, 0);
     lv_obj_clear_flag(top_bar_, LV_OBJ_FLAG_SCROLLABLE);
 
+    lv_obj_t* brand = lv_image_create(top_bar_);
+    lv_image_set_src(brand, &logo);
+    const int logo_width = std::min(side_column_width_ - 32, 368);
+    lv_obj_set_size(brand, logo_width, 60);
+    lv_image_set_inner_align(brand, LV_IMAGE_ALIGN_CONTAIN);
+    lv_obj_align(brand, LV_ALIGN_LEFT_MID, 16, 0);
+
     network_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(network_label_, MATERIAL_SYMBOLS_WIFI);
-    lv_obj_align(network_label_, LV_ALIGN_LEFT_MID, 30, 0);
+    lv_obj_align(network_label_, LV_ALIGN_RIGHT_MID, -92, 0);
 
     status_bar_ = lv_obj_create(top_bar_);
-    lv_obj_set_size(status_bar_, content_width_, kTopBarHeight);
+    // Reserve the right-hand clock and icon slots so status text cannot overlap them.
+    constexpr int kClockWidth = 360;
+    constexpr int kClockRightOffset = 256;
+    const int status_width = std::max(120, static_cast<int>(LV_HOR_RES) - 24 - side_column_width_ -
+                                               kClockWidth - kClockRightOffset - 24);
+    lv_obj_set_size(status_bar_, status_width, kTopBarHeight);
     MakePlain(status_bar_);
-    lv_obj_center(status_bar_);
+    lv_obj_align(status_bar_, LV_ALIGN_LEFT_MID, side_column_width_ + 8, 0);
 
     status_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(status_label_, LV_PCT(100));
@@ -326,23 +351,20 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(mute_label_, "");
-    lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -510, 0);
+    lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -200, 0);
 
     battery_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(battery_label_, "");
-    lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -458, 0);
+    lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -148, 0);
 
     date_time_label_ = lv_label_create(top_bar_);
-    lv_obj_set_width(date_time_label_, 420);
+    lv_obj_set_width(date_time_label_, kClockWidth);
     lv_obj_set_style_text_align(date_time_label_, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_color(date_time_label_, lv_color_hex(kMutedText), 0);
     lv_label_set_text(date_time_label_, "----/--/-- --:--:--");
-#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
-    lv_obj_align(date_time_label_, LV_ALIGN_RIGHT_MID, -24, 0);
-#else
-    lv_obj_align(date_time_label_, LV_ALIGN_RIGHT_MID, -92, 0);
+    lv_obj_align(date_time_label_, LV_ALIGN_RIGHT_MID, -kClockRightOffset, 0);
 
     lv_obj_t* settings_button = lv_button_create(top_bar_);
     lv_obj_set_size(settings_button, 64, 56);
@@ -360,16 +382,13 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_style_text_color(settings_button_icon_, lv_color_hex(kAccent), 0);
     lv_label_set_text(settings_button_icon_, MATERIAL_SYMBOLS_SETTINGS);
     lv_obj_center(settings_button_icon_);
-#endif
 }
 
 void HerdsmanLcdDisplay::UpdateColumnWidths() {
-    const int reference_center_width =
-        LV_HOR_RES * kReferenceCenterWidth / kReferenceScreenWidth;
-    side_column_width_ = (LV_HOR_RES - reference_center_width) / 2;
-
+    side_column_width_ = LV_HOR_RES * 20 / 100;
+    right_column_width_ = LV_HOR_RES * 30 / 100;
     const int left_width = HERDSMAN_UI_SHOW_LEFT_LOGO ? side_column_width_ : 0;
-    const int right_width = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? side_column_width_ : 0;
+    const int right_width = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? right_column_width_ : 0;
     content_width_ = LV_HOR_RES - left_width - right_width;
 
     constexpr int kChatListHorizontalPadding = 28;
@@ -378,31 +397,14 @@ void HerdsmanLcdDisplay::UpdateColumnWidths() {
         std::min(kMaxChatBubbleWidth,
                  std::max(120, content_width_ - kChatListHorizontalPadding - kAvatarAndGapWidth));
     system_bubble_width_ =
-        std::min(kMaxSystemBubbleWidth,
-                 std::max(120, content_width_ - kChatListHorizontalPadding));
+        std::min(kMaxSystemBubbleWidth, std::max(120, content_width_ - kChatListHorizontalPadding));
 }
 
 void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
-#if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
-    auto* theme = static_cast<LvglTheme*>(current_theme_);
-    const lv_font_t* text_font = theme->text_font()->font();
-    const lv_font_t* icon_font = theme->large_icon_font()->font();
-#endif
-
 #if HERDSMAN_UI_SHOW_LEFT_LOGO
-    lv_obj_t* left_panel = lv_obj_create(parent);
-    lv_obj_set_pos(left_panel, 0, kTopBarHeight + 16);
-    lv_obj_set_size(left_panel, side_column_width_, LV_VER_RES - kTopBarHeight - 16);
-    MakePlain(left_panel);
-
-    lv_obj_t* logo = lv_image_create(left_panel);
-    lv_image_set_src(logo, &herdsman_logo);
-    // lv_image_set_src(logo, &logo__qingdao_tsg);
-    lv_obj_center(logo);
+    CreateAudioPanel(parent);
 #endif
-
     const int left_panel_width = HERDSMAN_UI_SHOW_LEFT_LOGO ? side_column_width_ : 0;
-    const int right_panel_width = HERDSMAN_UI_SHOW_RIGHT_BUTTONS ? side_column_width_ : 0;
 
     content_ = lv_obj_create(parent);
     lv_obj_set_pos(content_, left_panel_width, kTopBarHeight + 24);
@@ -425,27 +427,141 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     CreateStandbyPanel();
 
 #if HERDSMAN_UI_SHOW_RIGHT_BUTTONS
-    lv_obj_t* right_panel = lv_obj_create(parent);
-    lv_obj_set_pos(right_panel, left_panel_width + content_width_, kTopBarHeight + 16);
-    lv_obj_set_size(right_panel, right_panel_width, LV_VER_RES - kTopBarHeight - 16);
-    MakePlain(right_panel);
-    lv_obj_clear_flag(right_panel, LV_OBJ_FLAG_SCROLLABLE);
+    CreateProductionChart(parent);
+#endif
+}
 
-    const int button_width = std::max(180, std::min(310, right_panel_width - 32));
-    lv_obj_t* settings_button =
-        CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_SETTINGS, "前往设置", text_font,
-                             icon_font, false, button_width, SettingsButtonEvent, this);
-    lv_obj_align(settings_button, LV_ALIGN_CENTER, 0, -62);
-    settings_button_icon_ = lv_obj_get_child(settings_button, 0);
-    settings_button_label_ = lv_obj_get_child(settings_button, 1);
-
-    lv_obj_t* chat_button = CreateIconTextButton(right_panel, MATERIAL_SYMBOLS_MIC, "开始对话",
-                                                 text_font, icon_font, true, button_width,
-                                                 ChatButtonEvent, this);
-    lv_obj_align(chat_button, LV_ALIGN_CENTER, 0, 66);
+void HerdsmanLcdDisplay::CreateAudioPanel(lv_obj_t* parent) {
+#if HERDSMAN_UI_SHOW_LEFT_LOGO
+    auto* theme = static_cast<LvglTheme*>(current_theme_);
+    lv_obj_t* panel = lv_obj_create(parent);
+    lv_obj_set_pos(panel, 0, kTopBarHeight + 24);
+    lv_obj_set_size(panel, side_column_width_, LV_VER_RES - kTopBarHeight - 40);
+    MakePlain(panel);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    audio_meter_height_ = std::min(180, (static_cast<int>(LV_VER_RES) - kTopBarHeight - 160) / 2);
+    const int spacing = std::max(3, (side_column_width_ - 48) / kAudioBarCount);
+    for (int i = 0; i < kAudioBarCount; ++i) {
+        audio_bars_[i] = lv_obj_create(panel);
+        lv_obj_remove_style_all(audio_bars_[i]);
+        lv_obj_set_style_bg_color(audio_bars_[i], lv_color_hex(kAccent), 0);
+        lv_obj_set_style_bg_opa(audio_bars_[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(audio_bars_[i], 2, 0);
+        lv_obj_set_size(audio_bars_[i], std::max(2, spacing / 3), 4);
+        lv_obj_align(audio_bars_[i], LV_ALIGN_CENTER, (i - kAudioBarCount / 2) * spacing, -48);
+    }
+    lv_obj_t* chat_button =
+        CreateIconTextButton(panel, MATERIAL_SYMBOLS_MIC, "开始对话", theme->text_font()->font(),
+                             theme->large_icon_font()->font(), true,
+                             std::min(280, side_column_width_ - 32), ChatButtonEvent, this);
+    lv_obj_set_height(chat_button, 64);
+    lv_obj_align(chat_button, LV_ALIGN_BOTTOM_MID, 0, -12);
     chat_button_icon_ = lv_obj_get_child(chat_button, 0);
     chat_button_label_ = lv_obj_get_child(chat_button, 1);
 #endif
+}
+
+void HerdsmanLcdDisplay::UpdateAudioMeter() {
+    const int input = HerdsmanAudioMeter::Consume(false);
+    const int output = HerdsmanAudioMeter::Consume(true);
+    const auto state = Application::GetInstance().GetDeviceState();
+    const int target = state == kDeviceStateSpeaking ? output : input;
+    // Fast attack and gentle release, with no allocations or audio reads in the UI task.
+    audio_level_ = target > audio_level_ ? target : (audio_level_ * 7 + target) / 8;
+    constexpr int profile[kAudioBarCount] = {22, 12, 18, 34, 16, 10, 24,  30, 20, 44, 90,
+                                             50, 34, 42, 58, 28, 62, 100, 70, 44, 24, 16,
+                                             12, 38, 20, 10, 16, 28, 36,  20, 26, 18, 12};
+    // Double the sound-driven excursion, keeping the quiet silhouette unchanged.
+    // Clamp the shared scale (rather than individual bars) to preserve its shape.
+    const int max_height = std::max(
+        3,
+        std::min(audio_meter_height_ * 2, static_cast<int>(LV_VER_RES) - kTopBarHeight - 40 - 112));
+    const int scale = std::min(100 + 2 * audio_level_, max_height * 1100 / audio_meter_height_);
+    for (int i = 0; i < kAudioBarCount; ++i) {
+        if (audio_bars_[i] != nullptr) {
+            const int height = std::max(3, profile[i] * audio_meter_height_ * scale / 110000);
+            lv_obj_set_height(audio_bars_[i], height);
+        }
+    }
+}
+
+void HerdsmanLcdDisplay::CreateProductionChart(lv_obj_t* parent) {
+    lv_obj_t* panel = lv_obj_create(parent);
+    const int left_width = HERDSMAN_UI_SHOW_LEFT_LOGO ? side_column_width_ : 0;
+    lv_obj_set_pos(panel, left_width + content_width_ + 8, kTopBarHeight + 24);
+    const int width = right_column_width_ - 20;
+    const int height = LV_VER_RES - kTopBarHeight - 40;
+    lv_obj_set_size(panel, width, height);
+    MakePlain(panel);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+
+    constexpr uint32_t colors[] = {0x398BFF, 0xA56AFF, 0x50C878};
+    constexpr int maxima[] = {1500, 200, 2500};
+    constexpr const char* units[] = {"kg", "L", "pcs"};
+    constexpr const char* names[] = {"料", "水", "蛋"};
+    constexpr int data[3][7] = {{900, 650, 420, 1050, 1100, 460, 1008},
+                                {20, 150, 175, 120, 112, 25, 108},
+                                {1800, 1400, 500, 1300, 2200, 600, 1888}};
+    for (int i = 0; i < 3; ++i) {
+        lv_obj_t* value = lv_label_create(panel);
+        lv_obj_set_pos(value, i * width / 3, 0);
+        lv_obj_set_width(value, width / 3);
+        lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(value, lv_color_hex(colors[i]), 0);
+        lv_label_set_text_fmt(value, "%s\n%d %s", names[i], data[i][6], units[i]);
+    }
+    lv_obj_t* caption = lv_label_create(panel);
+    lv_label_set_text(caption, "模拟数据");
+    lv_obj_set_style_text_color(caption, lv_color_hex(kMutedText), 0);
+    lv_obj_align(caption, LV_ALIGN_TOP_MID, 0, 80);
+
+    const int axis_width = std::clamp(width / 8, 44, 64);
+    const int plot_x = axis_width * 2;
+    const int plot_y = 140;
+    const int plot_width = width - axis_width * 3 - 4;
+    const int plot_height = height - plot_y - 48;
+    lv_obj_t* chart = lv_chart_create(panel);
+    lv_obj_set_pos(chart, plot_x, plot_y);
+    lv_obj_set_size(chart, plot_width, plot_height);
+    lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(chart, 0, 0);
+    lv_obj_set_style_pad_all(chart, 0, 0);
+    lv_obj_set_style_line_color(chart, lv_color_hex(kDivider), LV_PART_MAIN);
+    lv_obj_set_style_line_width(chart, 2, LV_PART_ITEMS);
+    lv_obj_set_style_size(chart, 6, 6, LV_PART_INDICATOR);
+    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(chart, 7);
+    lv_chart_set_div_line_count(chart, 5, 7);
+    lv_chart_set_axis_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
+    // LVGL supplies two Y axes. Normalize each series to draw three true independent scales.
+    for (int i = 0; i < 3; ++i) {
+        auto* series = lv_chart_add_series(chart, lv_color_hex(colors[i]), LV_CHART_AXIS_PRIMARY_Y);
+        for (int j = 0; j < 7; ++j) {
+            lv_chart_set_series_value_by_id(chart, series, j, data[i][j] * 1000 / maxima[i]);
+        }
+        const int x = i < 2 ? i * axis_width : plot_x + plot_width + 4;
+        lv_obj_t* unit = lv_label_create(panel);
+        lv_label_set_text(unit, units[i]);
+        lv_obj_set_style_text_color(unit, lv_color_hex(colors[i]), 0);
+        lv_obj_set_pos(unit, x, plot_y - 34);
+        for (int tick = 0; tick < 5; ++tick) {
+            lv_obj_t* label = lv_label_create(panel);
+            lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_color(label, lv_color_hex(colors[i]), 0);
+            lv_obj_set_width(label, axis_width - 2);
+            lv_obj_set_style_text_align(label, i < 2 ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT, 0);
+            lv_label_set_text_fmt(label, "%d", maxima[i] * (4 - tick) / 4);
+            lv_obj_set_pos(label, x, plot_y + tick * plot_height / 4 - 8);
+        }
+    }
+    for (int day = 0; day < 7; ++day) {
+        lv_obj_t* label = lv_label_create(panel);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(kMutedText), 0);
+        lv_label_set_text_fmt(label, "%d", day + 1);
+        lv_obj_set_pos(label, plot_x + day * plot_width / 6 - 4, plot_y + plot_height + 12);
+    }
+    lv_chart_refresh(chart);
 }
 
 void HerdsmanLcdDisplay::CreateStandbyPanel() {
@@ -714,8 +830,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     }
 
     lv_obj_t* bubble = lv_obj_create(row);
-    const int bubble_width =
-        (is_user || is_assistant) ? chat_bubble_width_ : system_bubble_width_;
+    const int bubble_width = (is_user || is_assistant) ? chat_bubble_width_ : system_bubble_width_;
     lv_obj_set_width(bubble, bubble_width);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(bubble, 18, 0);
@@ -723,8 +838,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_set_style_pad_all(bubble, 14, 0);
     lv_obj_set_style_bg_color(
         bubble,
-        lv_color_hex(is_user ? kUserBubble : (is_assistant ? kAssistantBubble : kSystemBubble)),
-        0);
+        lv_color_hex(is_user ? kUserBubble : (is_assistant ? kAssistantBubble : kSystemBubble)), 0);
     lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
 

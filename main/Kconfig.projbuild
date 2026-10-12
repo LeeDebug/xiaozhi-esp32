@@ -481,6 +481,8 @@ choice BOARD_TYPE
     config BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
         bool "Waveshare ESP32-P4-Nano"
         depends on IDF_TARGET_ESP32P4
+        select LV_USE_CHART
+        select LV_FONT_MONTSERRAT_14
     config BOARD_TYPE_WAVESHARE_ESP32_S3_AUDIO_BOARD
         bool "Waveshare ESP32-S3 Audio Board"
         depends on IDF_TARGET_ESP32S3

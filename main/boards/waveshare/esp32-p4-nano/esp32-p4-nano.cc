@@ -21,6 +21,7 @@
 #include "codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "herdsman_lcd_display.h"
+#include "herdsman_audio_meter.h"
 // #include "display/no_display.h"
 #include "production_mcp_tools.h"
 #include "production_modbus.h"
@@ -56,6 +57,24 @@ using WaveshareEsp32p4nanoBase = EthernetBoard;
 #else
 using WaveshareEsp32p4nanoBase = WifiBoard;
 #endif
+
+class HerdsmanAudioCodec : public Es8311AudioCodec {
+public:
+    using Es8311AudioCodec::Es8311AudioCodec;
+
+    bool InputData(std::vector<int16_t>& data) override {
+        const bool success = Es8311AudioCodec::InputData(data);
+        if (success) {
+            HerdsmanAudioMeter::Publish(data, input_channels(), false);
+        }
+        return success;
+    }
+
+    void OutputData(std::vector<int16_t>& data) override {
+        Es8311AudioCodec::OutputData(data);
+        HerdsmanAudioMeter::Publish(data, output_channels(), true);
+    }
+};
 
 class CustomBacklight : public Backlight {
 public:
@@ -413,7 +432,7 @@ public:
 
     /** @brief 取 ES8311 音频编解码器(静态单例, I2S+PA 引脚见 config.h). */
     virtual AudioCodec *GetAudioCodec() override {
-        static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+        static HerdsmanAudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
                                             AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
                                             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
         return &audio_codec;

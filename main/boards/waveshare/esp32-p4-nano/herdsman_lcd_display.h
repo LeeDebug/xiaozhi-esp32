@@ -1,12 +1,7 @@
 #pragma once
 /**
- * @file herdsman_lcd_display.h
- * @brief 牧场管理竖屏 UI:三栏布局(左Logo/中聊天/右按钮)+顶栏+设置页.
- *
- * 布局: 顶栏72px(网络/状态/静音/电池/时钟); 中部卡片为聊天列表,
- * 空闲时覆盖“推荐问题”待机面板; 右栏为“前往设置/开始对话”按钮.
- * 宽度按 1920 参考分辨率等比缩放, 见 `UpdateColumnWidths()`.
- * 配色全部取自 `config.h` 的 HERDSMAN_UI_COLOR_* 编译期色板.
+ * Board-local dashboard: top logo/settings, left audio meter/chat control,
+ * central conversation and right production trends with independent scales.
  */
 
 #include "display/lcd_display.h"
@@ -17,6 +12,7 @@ public:
                        int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y,
                        bool swap_xy);
 
+    ~HerdsmanLcdDisplay() override;
     void SetupUI() override;
     void SetTheme(Theme* theme) override;
     void SetStatus(const char* status) override;
@@ -27,15 +23,25 @@ public:
 
 private:
     static constexpr int kTopBarHeight = 72;
-    static constexpr int kReferenceScreenWidth = 1920;
     static constexpr int kReferenceCenterWidth = 1000;
     static constexpr int kMaxChatBubbleWidth = 780;
     static constexpr int kMaxSystemBubbleWidth = 850;
 
     int side_column_width_ = 460;
+    int right_column_width_ = 580;
     int content_width_ = kReferenceCenterWidth;
     int chat_bubble_width_ = kMaxChatBubbleWidth;
     int system_bubble_width_ = kMaxSystemBubbleWidth;
+
+    static constexpr int kAudioBarCount = 33;
+    lv_obj_t* audio_bars_[kAudioBarCount] = {};
+    lv_timer_t* audio_meter_timer_ = nullptr;
+    int audio_meter_height_ = 160;
+    int audio_level_ = 0;
+
+    void CreateAudioPanel(lv_obj_t* parent);
+    void CreateProductionChart(lv_obj_t* parent);
+    void UpdateAudioMeter();
 
     lv_obj_t* chat_list_ = nullptr;
     lv_obj_t* standby_panel_ = nullptr;

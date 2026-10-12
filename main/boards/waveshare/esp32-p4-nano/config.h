@@ -84,7 +84,8 @@
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false // 无 GPIO 背光, 反相标志保留仅为接口兼容
 
 /* Herdsman UI 布局开关: 置 0 即隐藏该栏并把空间让给中间聊天区(见 herdsman_lcd_display.cc).
- * SHOW_LEFT_LOGO=左栏青岛天尚logo; SHOW_RIGHT_BUTTONS=右栏“前往设置/开始对话”按钮. */
+ * SHOW_LEFT_LOGO=左栏音量柱形图及对话按钮; SHOW_RIGHT_BUTTONS=右栏生产趋势图.
+ * 名称保留以兼容现有配置; 顶栏 logo 和设置按钮始终显示. */
 #define HERDSMAN_UI_SHOW_LEFT_LOGO     1
 #define HERDSMAN_UI_SHOW_RIGHT_BUTTONS 1
 #if (HERDSMAN_UI_SHOW_LEFT_LOGO != 0 && HERDSMAN_UI_SHOW_LEFT_LOGO != 1) || \
