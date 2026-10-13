@@ -1,0 +1,9 @@
+Checking C:\Projects\xiaozhi-esp32-lee\main\display\lvgl_display\lvgl_display.cc
+[KC:\Projects\xiaozhi-esp32-lee\main\display\lvgl_display\lvgl_display.cc:[K In lambda function:
+[KC:\Projects\xiaozhi-esp32-lee\main\display\lvgl_display\lvgl_display.cc:370:13:[K [Kerror: [K'[Klv_image_cache_drop[K' was not declared in this scope; did you mean '[Klv_image_cache_data_t[K'?
+  370 |             [Klv_image_cache_drop[K(image->image_dsc());
+      |             [K^~~~~~~~~~~~~~~~~~~[K
+      |             [Klv_image_cache_data_t[K
+Exit: 1
+Checking C:\Projects\xiaozhi-esp32-lee\main\mcp_server.cc
+Exit: 0

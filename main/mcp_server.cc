@@ -4,24 +4,26 @@
  */
 
 #include "mcp_server.h"
-#include <esp_log.h>
 #include <esp_app_desc.h>
+#include <esp_heap_caps.h>
+#include <esp_log.h>
+#include <esp_pthread.h>
+#include <esp_timer.h>
 #include <algorithm>
 #include <cstring>
-#include <esp_pthread.h>
+#include <memory>
 
 #include "application.h"
-#include "display.h"
-#include "oled_display.h"
 #include "board.h"
-#include "settings.h"
-#include "lvgl_theme.h"
+#include "display.h"
 #include "lvgl_display.h"
+#include "lvgl_theme.h"
+#include "oled_display.h"
+#include "settings.h"
 
 #define TAG "MCP"
 
-McpServer::McpServer() {
-}
+McpServer::McpServer() {}
 
 McpServer::~McpServer() {
     for (auto tool : tools_) {
@@ -43,81 +45,206 @@ void McpServer::AddCommonTools() {
     // Custom tools must be added in the board's InitializeTools function.
 
     AddTool("self.get_device_status",
-        "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"
-        "Use this tool for: \n"
-        "1. Answering questions about current condition (e.g. what is the current volume of the audio speaker?)\n"
-        "2. As the first step to control the device (e.g. turn up / down the volume of the audio speaker, etc.)",
-        PropertyList(),
-        [&board](const PropertyList& properties) -> ReturnValue {
-            return board.GetDeviceStatusJson();
-        });
+            "Provides the real-time information of the device, including the current status of the "
+            "audio speaker, screen, battery, network, etc.\n"
+            "Use this tool for: \n"
+            "1. Answering questions about current condition (e.g. what is the current volume of "
+            "the audio speaker?)\n"
+            "2. As the first step to control the device (e.g. turn up / down the volume of the "
+            "audio speaker, etc.)",
+            PropertyList(), [&board](const PropertyList& properties) -> ReturnValue {
+                return board.GetDeviceStatusJson();
+            });
 
-    AddTool("self.audio_speaker.set_volume", 
-        "Set the volume of the audio speaker. If the current volume is unknown, you must call `self.get_device_status` tool first and then call this tool.",
-        PropertyList({
-            Property("volume", kPropertyTypeInteger, 0, 100)
-        }), 
-        [&board](const PropertyList& properties) -> ReturnValue {
-            auto codec = board.GetAudioCodec();
-            codec->SetOutputVolume(properties["volume"].value<int>());
-            return true;
-        });
-    
-    auto backlight = board.GetBacklight();
-    if (backlight) {
-        AddTool("self.screen.set_brightness",
-            "Set the brightness of the screen.",
-            PropertyList({
-                Property("brightness", kPropertyTypeInteger, 0, 100)
-            }),
-            [backlight](const PropertyList& properties) -> ReturnValue {
-                uint8_t brightness = static_cast<uint8_t>(properties["brightness"].value<int>());
-                backlight->SetBrightness(brightness, true);
+    AddTool("self.audio_speaker.set_volume",
+            "Set the volume of the audio speaker. If the current volume is unknown, you must call "
+            "`self.get_device_status` tool first and then call this tool.",
+            PropertyList({Property("volume", kPropertyTypeInteger, 0, 100)}),
+            [&board](const PropertyList& properties) -> ReturnValue {
+                auto codec = board.GetAudioCodec();
+                codec->SetOutputVolume(properties["volume"].value<int>());
                 return true;
             });
+
+    auto backlight = board.GetBacklight();
+    if (backlight) {
+        AddTool("self.screen.set_brightness", "Set the brightness of the screen.",
+                PropertyList({Property("brightness", kPropertyTypeInteger, 0, 100)}),
+                [backlight](const PropertyList& properties) -> ReturnValue {
+                    uint8_t brightness =
+                        static_cast<uint8_t>(properties["brightness"].value<int>());
+                    backlight->SetBrightness(brightness, true);
+                    return true;
+                });
     }
 
 #ifdef HAVE_LVGL
     auto display = board.GetDisplay();
     if (display && display->GetTheme() != nullptr) {
         AddTool("self.screen.set_theme",
-            "Set the theme of the screen. The theme can be `light` or `dark`.",
-            PropertyList({
-                Property("theme", kPropertyTypeString)
-            }),
-            [display](const PropertyList& properties) -> ReturnValue {
-                auto theme_name = properties["theme"].value<std::string>();
-                auto& theme_manager = LvglThemeManager::GetInstance();
-                auto theme = theme_manager.GetTheme(theme_name);
-                if (theme != nullptr) {
-                    display->SetTheme(theme);
+                "Set the theme of the screen. The theme can be `light` or `dark`.",
+                PropertyList({Property("theme", kPropertyTypeString)}),
+                [display](const PropertyList& properties) -> ReturnValue {
+                    auto theme_name = properties["theme"].value<std::string>();
+                    auto& theme_manager = LvglThemeManager::GetInstance();
+                    auto theme = theme_manager.GetTheme(theme_name);
+                    if (theme != nullptr) {
+                        display->SetTheme(theme);
+                        return true;
+                    }
+                    return false;
+                });
+    }
+
+    auto popup_display = dynamic_cast<LvglDisplay*>(display);
+    if (popup_display && !dynamic_cast<OledDisplay*>(display)) {
+        AddTool("self.screen.show_image",
+                "Show a knowledge-base image in a full-screen popup with a close button. "
+                "When asked for an image, search the knowledge base first, then pass the matching "
+                "image's direct HTTP/HTTPS URL. Never invent URLs. "
+                "Requires a PNG or JPEG image (maximum 1 MiB and 1048576 pixels; JPEG is "
+                "unavailable on ESP32).",
+                PropertyList({Property("url", kPropertyTypeString)}),
+                [popup_display](const PropertyList& properties) -> ReturnValue {
+                    const auto url = properties["url"].value<std::string>();
+                    if (url.size() > 2048 ||
+                        (url.compare(0, 7, "http://") != 0 && url.compare(0, 8, "https://") != 0) ||
+                        url.find_first_of("\r\n\t ") != std::string::npos) {
+                        throw std::runtime_error("Invalid image URL");
+                    }
+                    auto* network = Board::GetInstance().GetNetwork();
+                    if (!network) {
+                        throw std::runtime_error("Network is unavailable");
+                    }
+                    auto http = network->CreateHttp(3);
+                    if (!http) {
+                        throw std::runtime_error("HTTP client is unavailable");
+                    }
+                    http->SetTimeout(10000);
+                    http->SetHeader("Accept", "image/png,image/jpeg");
+                    struct HttpCloser {
+                        Http* client;
+                        ~HttpCloser() { client->Close(); }
+                    } closer{http.get()};
+                    if (!http->Open("GET", url) || http->GetStatusCode() != 200) {
+                        throw std::runtime_error("Failed to download image");
+                    }
+                    constexpr size_t max_size = 1024 * 1024;
+                    const size_t expected = http->GetBodyLength();
+                    if (expected > max_size) {
+                        throw std::runtime_error("Image exceeds 1 MiB");
+                    }
+                    // Bound unknown-length (chunked) responses as well as fixed-length responses.
+                    const size_t capacity = expected ? expected : max_size;
+                    // Preserve internal RAM for audio/network tasks. On devices with
+                    // PSRAM, fail rather than silently consuming internal RAM for images.
+                    const bool has_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) != 0;
+                    const uint32_t caps =
+                        MALLOC_CAP_8BIT | (has_psram ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL);
+                    std::unique_ptr<void, decltype(&heap_caps_free)> data(
+                        heap_caps_malloc(capacity, caps), heap_caps_free);
+                    if (!data) {
+                        throw std::runtime_error(
+                            has_psram ? "Not enough PSRAM for image download"
+                                      : "Not enough internal RAM for image download");
+                    }
+                    ESP_LOGI(TAG, "Image download buffer: %u bytes in %s",
+                             static_cast<unsigned>(capacity), has_psram ? "PSRAM" : "internal RAM");
+                    size_t used = 0;
+                    const int64_t deadline = esp_timer_get_time() + 30000000;
+                    while (used < capacity) {
+                        if (esp_timer_get_time() > deadline) {
+                            throw std::runtime_error("Image download timed out");
+                        }
+                        int count = http->Read(static_cast<char*>(data.get()) + used,
+                                               std::min(size_t(4096), capacity - used));
+                        if (count < 0) {
+                            throw std::runtime_error("Image download failed");
+                        }
+                        if (count == 0) {
+                            break;
+                        }
+                        used += count;
+                    }
+                    char extra;
+                    if (used == capacity && http->Read(&extra, 1) != 0) {
+                        throw std::runtime_error("Image exceeds declared length or limit");
+                    }
+                    if (expected && used != expected) {
+                        throw std::runtime_error("Incomplete image download");
+                    }
+                    // Validate dimensions before either decoder allocates its pixel buffer.
+                    const auto* bytes = static_cast<const uint8_t*>(data.get());
+                    const uint8_t signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
+                    uint32_t width = 0;
+                    uint32_t height = 0;
+                    auto read_be32 = [](const uint8_t* value) -> uint32_t {
+                        return (uint32_t(value[0]) << 24) | (uint32_t(value[1]) << 16) |
+                               (uint32_t(value[2]) << 8) | value[3];
+                    };
+                    if (used >= 33 && memcmp(bytes, signature, 8) == 0 &&
+                        memcmp(bytes + 12, "IHDR", 4) == 0 && read_be32(bytes + 8) == 13) {
+                        width = read_be32(bytes + 16);
+                        height = read_be32(bytes + 20);
+#ifndef CONFIG_IDF_TARGET_ESP32
+                    } else if (used >= 4 && bytes[0] == 0xff && bytes[1] == 0xd8) {
+                        // Parse bounded JPEG segments until the baseline SOF header. Progressive
+                        // JPEG is intentionally rejected because the software decoder cannot decode
+                        // it.
+                        size_t offset = 2;
+                        while (offset + 4 <= used) {
+                            if (bytes[offset++] != 0xff)
+                                break;
+                            while (offset < used && bytes[offset] == 0xff)
+                                ++offset;
+                            if (offset >= used)
+                                break;
+                            const uint8_t marker = bytes[offset++];
+                            if (marker == 0xda || marker == 0xd9)
+                                break;
+                            if (offset + 2 > used)
+                                break;
+                            const size_t length = (size_t(bytes[offset]) << 8) | bytes[offset + 1];
+                            if (length < 2 || length > used - offset)
+                                break;
+                            if (marker == 0xc0 && length >= 8) {
+                                height = (uint32_t(bytes[offset + 3]) << 8) | bytes[offset + 4];
+                                width = (uint32_t(bytes[offset + 5]) << 8) | bytes[offset + 6];
+                                break;
+                            }
+                            offset += length;
+                        }
+#endif
+                    }
+                    if (!width || !height || width > 2048 || height > 2048 ||
+                        uint64_t(width) * height > 1048576) {
+                        throw std::runtime_error("Unsupported image or dimensions exceed limit");
+                    }
+                    popup_display->ShowImagePopup(data.release(), used);
                     return true;
-                }
-                return false;
-            });
+                });
     }
 
     auto camera = board.GetCamera();
     if (camera) {
         AddTool("self.camera.take_photo",
-            "Always remember you have a camera. If the user asks you to see something, use this tool to take a photo and then explain it.\n"
-            "Args:\n"
-            "  `question`: The question that you want to ask about the photo.\n"
-            "Return:\n"
-            "  A JSON object that provides the photo information.",
-            PropertyList({
-                Property("question", kPropertyTypeString)
-            }),
-            [camera](const PropertyList& properties) -> ReturnValue {
-                // Lower the priority to do the camera capture
-                TaskPriorityReset priority_reset(1);
+                "Always remember you have a camera. If the user asks you to see something, use "
+                "this tool to take a photo and then explain it.\n"
+                "Args:\n"
+                "  `question`: The question that you want to ask about the photo.\n"
+                "Return:\n"
+                "  A JSON object that provides the photo information.",
+                PropertyList({Property("question", kPropertyTypeString)}),
+                [camera](const PropertyList& properties) -> ReturnValue {
+                    // Lower the priority to do the camera capture
+                    TaskPriorityReset priority_reset(1);
 
-                if (!camera->Capture()) {
-                    throw std::runtime_error("Failed to capture photo");
-                }
-                auto question = properties["question"].value<std::string>();
-                return camera->Explain(question);
-            });
+                    if (!camera->Capture()) {
+                        throw std::runtime_error("Failed to capture photo");
+                    }
+                    auto question = properties["question"].value<std::string>();
+                    return camera->Explain(question);
+                });
     }
 #endif
 
@@ -127,36 +254,35 @@ void McpServer::AddCommonTools() {
 
 void McpServer::AddUserOnlyTools() {
     // System tools
-    AddUserOnlyTool("self.get_system_info",
-        "Get the system information",
-        PropertyList(),
-        [this](const PropertyList& properties) -> ReturnValue {
-            auto& board = Board::GetInstance();
-            return board.GetSystemInfoJson();
-        });
+    AddUserOnlyTool("self.get_system_info", "Get the system information", PropertyList(),
+                    [this](const PropertyList& properties) -> ReturnValue {
+                        auto& board = Board::GetInstance();
+                        return board.GetSystemInfoJson();
+                    });
 
-    AddUserOnlyTool("self.reboot", "Reboot the system",
-        PropertyList(),
-        [this](const PropertyList& properties) -> ReturnValue {
-            auto& app = Application::GetInstance();
-            app.Schedule([&app]() {
-                ESP_LOGW(TAG, "User requested reboot");
-                vTaskDelay(pdMS_TO_TICKS(1000));
+    AddUserOnlyTool("self.reboot", "Reboot the system", PropertyList(),
+                    [this](const PropertyList& properties) -> ReturnValue {
+                        auto& app = Application::GetInstance();
+                        app.Schedule([&app]() {
+                            ESP_LOGW(TAG, "User requested reboot");
+                            vTaskDelay(pdMS_TO_TICKS(1000));
 
-                app.Reboot();
-            });
-            return true;
-        });
+                            app.Reboot();
+                        });
+                        return true;
+                    });
 
     // Firmware upgrade
-    AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
-        PropertyList({
-            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
-        }),
+    AddUserOnlyTool(
+        "self.upgrade_firmware",
+        "Upgrade firmware from a specific URL. This will download and install the firmware, then "
+        "reboot the device.",
+        PropertyList({Property("url", kPropertyTypeString,
+                               "The URL of the firmware binary file to download and install")}),
         [this](const PropertyList& properties) -> ReturnValue {
             auto url = properties["url"].value<std::string>();
             ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
-            
+
             auto& app = Application::GetInstance();
             app.Schedule([url, &app]() {
                 bool success = app.UpgradeFirmware(url);
@@ -164,7 +290,7 @@ void McpServer::AddUserOnlyTools() {
                     ESP_LOGE(TAG, "Firmware upgrade failed");
                 }
             });
-            
+
             return true;
         });
 
@@ -172,26 +298,25 @@ void McpServer::AddUserOnlyTools() {
 #ifdef HAVE_LVGL
     auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
     if (display) {
-        AddUserOnlyTool("self.screen.get_info", "Information about the screen, including width, height, etc.",
-            PropertyList(),
-            [display](const PropertyList& properties) -> ReturnValue {
-                cJSON *json = cJSON_CreateObject();
-                cJSON_AddNumberToObject(json, "width", display->width());
-                cJSON_AddNumberToObject(json, "height", display->height());
-                if (dynamic_cast<OledDisplay*>(display)) {
-                    cJSON_AddBoolToObject(json, "monochrome", true);
-                } else {
-                    cJSON_AddBoolToObject(json, "monochrome", false);
-                }
-                return json;
-            });
+        AddUserOnlyTool("self.screen.get_info",
+                        "Information about the screen, including width, height, etc.",
+                        PropertyList(), [display](const PropertyList& properties) -> ReturnValue {
+                            cJSON* json = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(json, "width", display->width());
+                            cJSON_AddNumberToObject(json, "height", display->height());
+                            if (dynamic_cast<OledDisplay*>(display)) {
+                                cJSON_AddBoolToObject(json, "monochrome", true);
+                            } else {
+                                cJSON_AddBoolToObject(json, "monochrome", false);
+                            }
+                            return json;
+                        });
 
 #if CONFIG_LV_USE_SNAPSHOT
-        AddUserOnlyTool("self.screen.snapshot", "Snapshot the screen and upload it to a specific URL",
-            PropertyList({
-                Property("url", kPropertyTypeString),
-                Property("quality", kPropertyTypeInteger, 80, 1, 100)
-            }),
+        AddUserOnlyTool(
+            "self.screen.snapshot", "Snapshot the screen and upload it to a specific URL",
+            PropertyList({Property("url", kPropertyTypeString),
+                          Property("quality", kPropertyTypeInteger, 80, 1, 100)}),
             [display](const PropertyList& properties) -> ReturnValue {
                 auto url = properties["url"].value<std::string>();
                 auto quality = properties["quality"].value<int>();
@@ -202,10 +327,10 @@ void McpServer::AddUserOnlyTools() {
                 }
 
                 ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
-                
+
                 // 构造multipart/form-data请求体
                 std::string boundary = "----ESP32_SCREEN_SNAPSHOT_BOUNDARY";
-                
+
                 auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
                 http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
                 if (!http->Open("POST", url)) {
@@ -215,7 +340,9 @@ void McpServer::AddUserOnlyTools() {
                     // 文件字段头部
                     std::string file_header;
                     file_header += "--" + boundary + "\r\n";
-                    file_header += "Content-Disposition: form-data; name=\"file\"; filename=\"screenshot.jpg\"\r\n";
+                    file_header +=
+                        "Content-Disposition: form-data; name=\"file\"; "
+                        "filename=\"screenshot.jpg\"\r\n";
                     file_header += "Content-Type: image/jpeg\r\n";
                     file_header += "\r\n";
                     http->Write(file_header.c_str(), file_header.size());
@@ -233,18 +360,18 @@ void McpServer::AddUserOnlyTools() {
                 http->Write("", 0);
 
                 if (http->GetStatusCode() != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(http->GetStatusCode()));
+                    throw std::runtime_error("Unexpected status code: " +
+                                             std::to_string(http->GetStatusCode()));
                 }
                 std::string result = http->ReadAll();
                 http->Close();
                 ESP_LOGI(TAG, "Snapshot screen result: %s", result.c_str());
                 return true;
             });
-        
-        AddUserOnlyTool("self.screen.preview_image", "Preview an image on the screen",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
+
+        AddUserOnlyTool(
+            "self.screen.preview_image", "Preview an image on the screen",
+            PropertyList({Property("url", kPropertyTypeString)}),
             [display](const PropertyList& properties) -> ReturnValue {
                 auto url = properties["url"].value<std::string>();
                 auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
@@ -254,7 +381,8 @@ void McpServer::AddUserOnlyTools() {
                 }
                 int status_code = http->GetStatusCode();
                 if (status_code != 200) {
-                    throw std::runtime_error("Unexpected status code: " + std::to_string(status_code));
+                    throw std::runtime_error("Unexpected status code: " +
+                                             std::to_string(status_code));
                 }
 
                 size_t content_length = http->GetBodyLength();
@@ -280,26 +408,27 @@ void McpServer::AddUserOnlyTools() {
                 display->SetPreviewImage(std::move(image));
                 return true;
             });
-#endif // CONFIG_LV_USE_SNAPSHOT
+#endif  // CONFIG_LV_USE_SNAPSHOT
     }
-#endif // HAVE_LVGL
+#endif  // HAVE_LVGL
 
-    // Assets download url (always registered — Settings storage works regardless of partition layout)
+    // Assets download url (always registered — Settings storage works regardless of partition
+    // layout)
     AddUserOnlyTool("self.assets.set_download_url", "Set the download url for the assets",
-            PropertyList({
-                Property("url", kPropertyTypeString)
-            }),
-            [](const PropertyList& properties) -> ReturnValue {
-                auto url = properties["url"].value<std::string>();
-                Settings settings("assets", true);
-                settings.SetString("download_url", url);
-                return true;
-            });
+                    PropertyList({Property("url", kPropertyTypeString)}),
+                    [](const PropertyList& properties) -> ReturnValue {
+                        auto url = properties["url"].value<std::string>();
+                        Settings settings("assets", true);
+                        settings.SetString("download_url", url);
+                        return true;
+                    });
 }
 
 void McpServer::AddTool(McpTool* tool) {
     // Prevent adding duplicate tools
-    if (std::find_if(tools_.begin(), tools_.end(), [tool](const McpTool* t) { return t->name() == tool->name(); }) != tools_.end()) {
+    if (std::find_if(tools_.begin(), tools_.end(), [tool](const McpTool* t) {
+            return t->name() == tool->name();
+        }) != tools_.end()) {
         ESP_LOGW(TAG, "Tool %s already added", tool->name().c_str());
         return;
     }
@@ -308,11 +437,15 @@ void McpServer::AddTool(McpTool* tool) {
     tools_.push_back(tool);
 }
 
-void McpServer::AddTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback) {
+void McpServer::AddTool(const std::string& name, const std::string& description,
+                        const PropertyList& properties,
+                        std::function<ReturnValue(const PropertyList&)> callback) {
     AddTool(new McpTool(name, description, properties, callback));
 }
 
-void McpServer::AddUserOnlyTool(const std::string& name, const std::string& description, const PropertyList& properties, std::function<ReturnValue(const PropertyList&)> callback) {
+void McpServer::AddUserOnlyTool(const std::string& name, const std::string& description,
+                                const PropertyList& properties,
+                                std::function<ReturnValue(const PropertyList&)> callback) {
     auto tool = new McpTool(name, description, properties, callback);
     tool->set_user_only(true);
     AddTool(tool);
@@ -350,23 +483,24 @@ void McpServer::ParseCapabilities(const cJSON* capabilities) {
 void McpServer::ParseMessage(const cJSON* json) {
     // Check JSONRPC version
     auto version = cJSON_GetObjectItem(json, "jsonrpc");
-    if (version == nullptr || !cJSON_IsString(version) || strcmp(version->valuestring, "2.0") != 0) {
+    if (version == nullptr || !cJSON_IsString(version) ||
+        strcmp(version->valuestring, "2.0") != 0) {
         ESP_LOGE(TAG, "Invalid JSONRPC version: %s", version ? version->valuestring : "null");
         return;
     }
-    
+
     // Check method
     auto method = cJSON_GetObjectItem(json, "method");
     if (method == nullptr || !cJSON_IsString(method)) {
         ESP_LOGE(TAG, "Missing method");
         return;
     }
-    
+
     auto method_str = std::string(method->valuestring);
     if (method_str.find("notifications") == 0) {
         return;
     }
-    
+
     // Check params
     auto params = cJSON_GetObjectItem(json, "params");
     if (params != nullptr && !cJSON_IsObject(params)) {
@@ -380,7 +514,7 @@ void McpServer::ParseMessage(const cJSON* json) {
         return;
     }
     auto id_int = id->valueint;
-    
+
     if (method_str == "initialize") {
         if (cJSON_IsObject(params)) {
             auto capabilities = cJSON_GetObjectItem(params, "capabilities");
@@ -389,7 +523,9 @@ void McpServer::ParseMessage(const cJSON* json) {
             }
         }
         auto app_desc = esp_app_get_description();
-        std::string message = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"" BOARD_NAME "\",\"version\":\"";
+        std::string message =
+            "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{"
+            "\"name\":\"" BOARD_NAME "\",\"version\":\"";
         message += app_desc->version;
         message += "\"}}";
         ReplyResult(id_int, message);
@@ -452,11 +588,11 @@ void McpServer::ReplyError(int id, const std::string& message) {
 void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_only_tools) {
     const int max_payload_size = 8000;
     std::string json = "{\"tools\":[";
-    
+
     bool found_cursor = cursor.empty();
     auto it = tools_.begin();
     std::string next_cursor = "";
-    
+
     while (it != tools_.end()) {
         // 如果我们还没有找到起始位置，继续搜索
         if (!found_cursor) {
@@ -472,7 +608,7 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
             ++it;
             continue;
         }
-        
+
         // 添加tool前检查大小
         std::string tool_json = (*it)->to_json() + ",";
         if (json.length() + tool_json.length() + 30 > max_payload_size) {
@@ -480,18 +616,19 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
             next_cursor = (*it)->name();
             break;
         }
-        
+
         json += tool_json;
         ++it;
     }
-    
+
     if (json.back() == ',') {
         json.pop_back();
     }
-    
+
     if (json.back() == '[' && !tools_.empty()) {
         // 如果没有添加任何tool，返回错误
-        ESP_LOGE(TAG, "tools/list: Failed to add tool %s because of payload size limit", next_cursor.c_str());
+        ESP_LOGE(TAG, "tools/list: Failed to add tool %s because of payload size limit",
+                 next_cursor.c_str());
         ReplyError(id, "Failed to add tool " + next_cursor + " because of payload size limit");
         return;
     }
@@ -501,16 +638,15 @@ void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_o
     } else {
         json += "],\"nextCursor\":\"" + next_cursor + "\"}";
     }
-    
+
     ReplyResult(id, json);
 }
 
 void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
-    auto tool_iter = std::find_if(tools_.begin(), tools_.end(), 
-                                 [&tool_name](const McpTool* tool) { 
-                                     return tool->name() == tool_name; 
-                                 });
-    
+    auto tool_iter = std::find_if(tools_.begin(), tools_.end(), [&tool_name](const McpTool* tool) {
+        return tool->name() == tool_name;
+    });
+
     if (tool_iter == tools_.end()) {
         ESP_LOGE(TAG, "tools/call: Unknown tool: %s", tool_name.c_str());
         ReplyError(id, "Unknown tool: " + tool_name);
@@ -544,6 +680,49 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
     } catch (const std::exception& e) {
         ESP_LOGE(TAG, "tools/call: %s", e.what());
         ReplyError(id, e.what());
+        return;
+    }
+
+    // Network IO runs off the main loop. Only one worker is allowed at a time.
+    if (tool_name == "self.screen.show_image") {
+        if (image_download_busy_.exchange(true)) {
+            ReplyError(id, "An image download is already in progress");
+            return;
+        }
+        auto previous_config = esp_pthread_get_default_config();
+        esp_pthread_get_cfg(&previous_config);
+        auto config = previous_config;
+        config.stack_size = 8192;
+        config.prio = 1;
+        config.thread_name = "image_download";
+        if (esp_pthread_set_cfg(&config) != ESP_OK) {
+            image_download_busy_ = false;
+            ReplyError(id, "Failed to configure image download worker");
+            return;
+        }
+        try {
+            std::thread([this, id, tool = *tool_iter, arguments = std::move(arguments)]() {
+                std::string result;
+                std::string error;
+                try {
+                    result = tool->Call(arguments);
+                } catch (const std::exception& exception) {
+                    error = exception.what();
+                }
+                Application::GetInstance().Schedule([this, id, result, error]() {
+                    image_download_busy_ = false;
+                    if (error.empty()) {
+                        ReplyResult(id, result);
+                    } else {
+                        ReplyError(id, error);
+                    }
+                });
+            }).detach();
+        } catch (const std::exception&) {
+            image_download_busy_ = false;
+            ReplyError(id, "Failed to start image download worker");
+        }
+        esp_pthread_set_cfg(&previous_config);
         return;
     }
 

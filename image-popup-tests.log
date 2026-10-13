@@ -1,0 +1,322 @@
+test_board_menu_has_explicit_target_defaults (test_build.BoardMenuTests.test_board_menu_has_explicit_target_defaults) ... ok
+test_board_menu_is_sorted_and_matches_cmake (test_build.BoardMenuTests.test_board_menu_is_sorted_and_matches_cmake) ... ok
+test_alientek_directory_keeps_atk_board_types (test_build.BoardSelectionTests.test_alientek_directory_keeps_atk_board_types) ... ok
+test_board_display_name_comes_from_kconfig_prompt (test_build.BoardSelectionTests.test_board_display_name_comes_from_kconfig_prompt) ... ok
+test_common_and_core_changes_select_all (test_build.BoardSelectionTests.test_common_and_core_changes_select_all) ... ok
+test_docs_only_selects_none (test_build.BoardSelectionTests.test_docs_only_selects_none) ... ok
+test_m5stack_directory_can_omit_manufacturer_prefix (test_build.BoardSelectionTests.test_m5stack_directory_can_omit_manufacturer_prefix) ... ok
+test_nested_manufacturer_board_path (test_build.BoardSelectionTests.test_nested_manufacturer_board_path) ... ok
+test_new_manufacturer_directories_keep_existing_board_types (test_build.BoardSelectionTests.test_new_manufacturer_directories_keep_existing_board_types) ... ok
+test_official_directory_can_keep_legacy_board_type (test_build.BoardSelectionTests.test_official_directory_can_keep_legacy_board_type) ... ok
+test_same_leaf_names_are_scoped_by_manufacturer (test_build.BoardSelectionTests.test_same_leaf_names_are_scoped_by_manufacturer) ... ok
+test_variant_name_disambiguates_shared_board_directory (test_build.BoardSelectionTests.test_variant_name_disambiguates_shared_board_directory) ... ok
+test_relative_board_includes_exist (test_build.BoardSourceTests.test_relative_board_includes_exist) ... FAIL
+test_blufi_expansion_disables_hotspot (test_build.BuildOptionTests.test_blufi_expansion_disables_hotspot) ... ok
+test_camera_board_defaults_are_declared_by_board_config (test_build.BuildOptionTests.test_camera_board_defaults_are_declared_by_board_config) ... ok
+test_camera_mirror_guard_is_settable_by_build_defaults (test_build.BuildOptionTests.test_camera_mirror_guard_is_settable_by_build_defaults) ... ok
+test_configured_build_options_are_verified (test_build.BuildOptionTests.test_configured_build_options_are_verified) ... ERROR
+test_display_style_only_writes_board_supported_choices (test_build.BuildOptionTests.test_display_style_only_writes_board_supported_choices) ... ok
+test_incompatible_wake_word_model_is_rejected (test_build.BuildOptionTests.test_incompatible_wake_word_model_is_rejected) ... ok
+test_language_normalization_and_option (test_build.BuildOptionTests.test_language_normalization_and_option) ... ok
+test_languages_are_discovered_from_build_configuration (test_build.BuildOptionTests.test_languages_are_discovered_from_build_configuration) ... ok
+test_lcd_board_exposes_curated_display_options (test_build.BuildOptionTests.test_lcd_board_exposes_curated_display_options) ... ok
+test_missing_esp_sr_kconfig_has_actionable_error (test_build.BuildOptionTests.test_missing_esp_sr_kconfig_has_actionable_error) ... ok
+test_non_default_style_disables_multiline_chat (test_build.BuildOptionTests.test_non_default_style_disables_multiline_chat) ... ok
+test_optional_usb_camera_options_require_camera_to_be_enabled (test_build.BuildOptionTests.test_optional_usb_camera_options_require_camera_to_be_enabled) ... ok
+test_supported_languages_match_kconfig_and_cmake (test_build.BuildOptionTests.test_supported_languages_match_kconfig_and_cmake) ... ok
+test_unknown_semantic_build_option_is_rejected (test_build.BuildOptionTests.test_unknown_semantic_build_option_is_rejected) ... ok
+test_user_options_override_board_options (test_build.BuildOptionTests.test_user_options_override_board_options) ... ok
+test_wake_word_alias_selects_target_engine (test_build.BuildOptionTests.test_wake_word_alias_selects_target_engine) ... ok
+test_wake_word_disabled_removes_target_default_model (test_build.BuildOptionTests.test_wake_word_disabled_removes_target_default_model) ... ok
+test_wake_words_are_read_from_esp_sr_kconfig (test_build.BuildOptionTests.test_wake_words_are_read_from_esp_sr_kconfig) ... ok
+test_build_does_not_create_zip_by_default (test_build.CliTests.test_build_does_not_create_zip_by_default) ... ok
+test_build_options_json_is_forwarded (test_build.CliTests.test_build_options_json_is_forwarded) ... ok
+test_language_and_wake_word_are_forwarded (test_build.CliTests.test_language_and_wake_word_are_forwarded) ... ok
+test_list_boards_prints_boards_and_multi_variants (test_build.CliTests.test_list_boards_prints_boards_and_multi_variants) ... ok
+test_list_languages_supports_json (test_build.CliTests.test_list_languages_supports_json) ... ok
+test_list_wake_words_supports_json (test_build.CliTests.test_list_wake_words_supports_json) ... ok
+test_no_arguments_prints_help_without_building (test_build.CliTests.test_no_arguments_prints_help_without_building) ... ok
+test_zip_flag_is_forwarded (test_build.CliTests.test_zip_flag_is_forwarded) ... ok
+test_duplicate_reported_identifiers_fail_collection (test_build.InvalidConfigTests.test_duplicate_reported_identifiers_fail_collection) ... ok
+test_invalid_reported_identifiers_are_rejected (test_build.InvalidConfigTests.test_invalid_reported_identifiers_are_rejected) ... ok
+test_invalid_version_rule_fails_collection (test_build.InvalidConfigTests.test_invalid_version_rule_fails_collection) ... ok
+test_missing_reported_type_fails_collection (test_build.InvalidConfigTests.test_missing_reported_type_fails_collection) ... ok
+test_merge_bin_enables_preview_mode (test_build.PreviewTargetTests.test_merge_bin_enables_preview_mode) ... ok
+test_stage_marker_is_only_emitted_when_enabled (test_build.PreviewTargetTests.test_stage_marker_is_only_emitted_when_enabled) ... ok
+test_changed_cmake_target_runs_fullclean_only (test_build.TargetConfigurationTests.test_changed_cmake_target_runs_fullclean_only) ... ok
+test_configure_build_replaces_stale_sdkconfig_backup (test_build.TargetConfigurationTests.test_configure_build_replaces_stale_sdkconfig_backup) ... ERROR
+test_configure_build_uses_all_cmake_values_in_one_run (test_build.TargetConfigurationTests.test_configure_build_uses_all_cmake_values_in_one_run) ... ERROR
+test_same_target_does_not_clean_build_directory (test_build.TargetConfigurationTests.test_same_target_does_not_clean_build_directory) ... ok
+test_sync_vscode_target_preserves_other_settings (test_build.TargetConfigurationTests.test_sync_vscode_target_preserves_other_settings) ... ok
+test_sync_vscode_target_skips_missing_settings (test_build.TargetConfigurationTests.test_sync_vscode_target_skips_missing_settings) ... ok
+test_interactive_selection_accepts_number (test_build.VariantSelectionTests.test_interactive_selection_accepts_number) ... ok
+test_non_interactive_selection_requires_name (test_build.VariantSelectionTests.test_non_interactive_selection_requires_name) ... [ERROR] Multiple variants found in non-interactive mode; select one with --name.
+ok
+test_chip_defaults_only_contain_target_overrides (test_build.VersionTests.test_chip_defaults_only_contain_target_overrides) ... ok
+test_current_matrix_uniqueness_and_p4_variants (test_build.VersionTests.test_current_matrix_uniqueness_and_p4_variants) ... [WARN] Ambiguous board config for lilygo/t-cameraplus-s3 (target=esp32s3), target-matched candidates=['CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1', 'CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_2'], selecting first: CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
+[WARN] Explicit board config CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_4_3C does not exist in Kconfig; resolving it from BOARD_DIR='waveshare/esp32-s3-touch-lcd-4.3c' instead.
+[WARN] Ambiguous board config for lilygo/t-cameraplus-s3 (target=esp32s3), target-matched candidates=['CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1', 'CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_2'], selecting first: CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
+[WARN] Explicit board config CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_4_3C does not exist in Kconfig; resolving it from BOARD_DIR='waveshare/esp32-s3-touch-lcd-4.3c' instead.
+[WARN] Ambiguous board config for lilygo/t-cameraplus-s3 (target=esp32s3), target-matched candidates=['CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1', 'CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_2'], selecting first: CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
+[WARN] Explicit board config CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_4_3C does not exist in Kconfig; resolving it from BOARD_DIR='waveshare/esp32-s3-touch-lcd-4.3c' instead.
+ok
+test_default_flash_options_are_not_repeated (test_build.VersionTests.test_default_flash_options_are_not_repeated) ... ok
+test_language_and_wake_word_are_not_board_config_options (test_build.VersionTests.test_language_and_wake_word_are_not_board_config_options) ... ok
+test_parse_and_match (test_build.VersionTests.test_parse_and_match) ... ok
+test_reported_types_and_names_are_valid_and_unique (test_build.VersionTests.test_reported_types_and_names_are_valid_and_unique) ... ok
+test_zip_is_always_recreated (test_build.ZipTests.test_zip_is_always_recreated) ... ERROR
+test_text_font_metadata_uses_bundle_charset_size_and_bpp (test_build_default_assets.BuildDefaultAssetsTest.test_text_font_metadata_uses_bundle_charset_size_and_bpp) ... ok
+test_text_font_requires_bundle (test_build_default_assets.BuildDefaultAssetsTest.test_text_font_requires_bundle) ... ok
+
+======================================================================
+ERROR: test_configured_build_options_are_verified (test_build.BuildOptionTests.test_configured_build_options_are_verified)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp0s7admef'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 910, in onexc
+    _os.unlink(path)
+    ~~~~~~~~~~^^^^^^
+PermissionError: [WinError 5] 拒绝访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp0s7admef'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Projects\xiaozhi-esp32-lee\scripts\tests\test_build.py", line 956, in test_configured_build_options_are_verified
+    with tempfile.TemporaryDirectory() as temp_dir:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 951, in __exit__
+    self.cleanup()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 955, in cleanup
+    self._rmtree(self.name, ignore_errors=self._ignore_cleanup_errors)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 925, in onexc
+    cls._rmtree(path, ignore_errors=ignore_errors,
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                repeated=(path == name))
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp0s7admef'
+
+======================================================================
+ERROR: test_configure_build_replaces_stale_sdkconfig_backup (test_build.TargetConfigurationTests.test_configure_build_replaces_stale_sdkconfig_backup)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp4sg9zzl8'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 910, in onexc
+    _os.unlink(path)
+    ~~~~~~~~~~^^^^^^
+PermissionError: [WinError 5] 拒绝访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp4sg9zzl8'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Projects\xiaozhi-esp32-lee\scripts\tests\test_build.py", line 765, in test_configure_build_replaces_stale_sdkconfig_backup
+    with tempfile.TemporaryDirectory() as temp_dir:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 951, in __exit__
+    self.cleanup()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 955, in cleanup
+    self._rmtree(self.name, ignore_errors=self._ignore_cleanup_errors)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 925, in onexc
+    cls._rmtree(path, ignore_errors=ignore_errors,
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                repeated=(path == name))
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp4sg9zzl8'
+
+======================================================================
+ERROR: test_configure_build_uses_all_cmake_values_in_one_run (test_build.TargetConfigurationTests.test_configure_build_uses_all_cmake_values_in_one_run)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmpzu6ai18r'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 910, in onexc
+    _os.unlink(path)
+    ~~~~~~~~~~^^^^^^
+PermissionError: [WinError 5] 拒绝访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmpzu6ai18r'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Projects\xiaozhi-esp32-lee\scripts\tests\test_build.py", line 720, in test_configure_build_uses_all_cmake_values_in_one_run
+    with tempfile.TemporaryDirectory() as temp_dir:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 951, in __exit__
+    self.cleanup()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 955, in cleanup
+    self._rmtree(self.name, ignore_errors=self._ignore_cleanup_errors)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 925, in onexc
+    cls._rmtree(path, ignore_errors=ignore_errors,
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                repeated=(path == name))
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmpzu6ai18r'
+
+======================================================================
+ERROR: test_zip_is_always_recreated (test_build.ZipTests.test_zip_is_always_recreated)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp8zbdywlx'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 910, in onexc
+    _os.unlink(path)
+    ~~~~~~~~~~^^^^^^
+PermissionError: [WinError 5] 拒绝访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp8zbdywlx'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Projects\xiaozhi-esp32-lee\scripts\tests\test_build.py", line 1392, in test_zip_is_always_recreated
+    with tempfile.TemporaryDirectory() as temp_dir:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 951, in __exit__
+    self.cleanup()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 955, in cleanup
+    self._rmtree(self.name, ignore_errors=self._ignore_cleanup_errors)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 925, in onexc
+    cls._rmtree(path, ignore_errors=ignore_errors,
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                repeated=(path == name))
+                ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\tempfile.py", line 935, in _rmtree
+    _shutil.rmtree(name, onexc=onexc)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 790, in rmtree
+    return _rmtree_unsafe(path, onexc)
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 635, in _rmtree_unsafe
+    onexc(os.rmdir, path, err)
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\scoop\apps\python313\current\Lib\shutil.py", line 631, in _rmtree_unsafe
+    os.rmdir(path)
+    ~~~~~~~~^^^^^^
+PermissionError: [WinError 32] 另一个程序正在使用此文件，进程无法访问。: 'C:\\Projects\\xiaozhi-esp32-lee\\.tmp-image-validation\\tmp8zbdywlx'
+
+======================================================================
+FAIL: test_relative_board_includes_exist (test_build.BoardSourceTests.test_relative_board_includes_exist)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Projects\xiaozhi-esp32-lee\scripts\tests\test_build.py", line 1385, in test_relative_board_includes_exist
+    self.assertEqual(missing, [])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+AssertionError: Lists differ: ['main\\boards\\waveshare\\esp32-p4-nano\\[37 chars]l.h'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'main\\boards\\waveshare\\esp32-p4-nano\\assets\\logo__qingdao_tsg.c:5: ../lvgl.h'
+
++ []
+- ['main\\boards\\waveshare\\esp32-p4-nano\\assets\\logo__qingdao_tsg.c:5: '
+-  '../lvgl.h']
+
+----------------------------------------------------------------------
+Ran 62 tests in 5.627s
+
+FAILED (failures=1, errors=4)
+[INFO] Switching target from esp32c3 to esp32s3.
+[INFO] Reusing target esp32s3.
+[INFO] Updated C:\Projects\xiaozhi-esp32-lee\.tmp-image-validation\tmpzsri3bu0\settings.json IDF_TARGET to esp32s3.
+Available variants for test-board:
+  1. variant-a
+  2. variant-b
+Available variants for test-board:
+  1. variant-a
+  2. variant-b
+zip bin to releases\v1.2.3_test-board.zip done
+Generated: C:\Projects\xiaozhi-esp32-lee\.tmp-image-validation\tmp3loe74tf\index.json

@@ -1,8 +1,11 @@
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <material_symbols.h>
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 
 #include "application.h"
@@ -11,9 +14,11 @@
 #include "board.h"
 #include "dynamic_glyph_cache.h"
 #include "jpg/image_to_jpeg.h"
+#include "jpg/jpeg_to_image.h"
 #include "lvgl_display.h"
 #include "lvgl_theme.h"
 #include "settings.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
 
 #define TAG "Display"
 
@@ -298,6 +303,118 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
     }
 
     esp_pm_lock_release(pm_lock_);
+}
+
+void LvglDisplay::ShowImagePopup(void* data, size_t size) {
+    // Keep ownership even if decoder validation throws. LVGL decoders require the display lock.
+    std::unique_ptr<void, decltype(&heap_caps_free)> buffer(data, heap_caps_free);
+    std::unique_ptr<LvglImage> image;
+#ifndef CONFIG_IDF_TARGET_ESP32
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    if (size >= 2 && bytes[0] == 0xff && bytes[1] == 0xd8) {
+        uint8_t* pixels = nullptr;
+        size_t pixel_size = 0, width = 0, height = 0, stride = 0;
+        if (jpeg_to_image(bytes, size, &pixels, &pixel_size, &width, &height, &stride) != ESP_OK) {
+            throw std::runtime_error("Failed to decode JPEG");
+        }
+        std::unique_ptr<void, decltype(&heap_caps_free)> decoded(pixels, heap_caps_free);
+        image = std::make_unique<LvglAllocatedImage>(pixels, pixel_size, width, height, stride,
+                                                     LV_COLOR_FORMAT_RGB565);
+        decoded.release();
+    }
+#endif
+    // Unlike DisplayLockGuard, do not continue or unlock if acquisition fails.
+    if (!Lock(30000)) {
+        throw std::runtime_error("Failed to lock display for image popup");
+    }
+    auto unlock = [](LvglDisplay* display) { display->Unlock(); };
+    std::unique_ptr<LvglDisplay, decltype(unlock)> lock(this, unlock);
+    if (!display_) {
+        throw std::runtime_error("Screen is unavailable");
+    }
+    if (!image) {
+        image = std::make_unique<LvglAllocatedImage>(data, size);
+        buffer.release();
+    }
+    const auto* descriptor = image->image_dsc();
+    if (descriptor->header.w == 0 || descriptor->header.h == 0) {
+        throw std::runtime_error("Invalid image dimensions");
+    }
+
+    // Keep the small widget tree alive to avoid destroying an input event target.
+    // All accesses here are protected by the successfully acquired display lock.
+    const int screen_width = lv_display_get_horizontal_resolution(display_);
+    const int screen_height = lv_display_get_vertical_resolution(display_);
+    if (!image_popup_) {
+        image_popup_ = lv_obj_create(lv_display_get_layer_top(display_));
+        lv_obj_remove_style_all(image_popup_);
+        lv_obj_set_pos(image_popup_, 0, 0);
+        lv_obj_set_style_bg_color(image_popup_, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(image_popup_, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(image_popup_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
+        image_popup_picture_ = lv_image_create(image_popup_);
+        image_popup_close_ = lv_button_create(image_popup_);
+        auto* label = lv_label_create(image_popup_close_);
+        lv_label_set_text(label, LV_SYMBOL_CLOSE);
+        lv_obj_center(label);
+        lv_obj_add_event_cb(
+            image_popup_close_,
+            [](lv_event_t* event) {
+                // The LVGL port holds its lock while dispatching this callback. Defer image
+                // release to the main task, which acquires the same lock explicitly.
+                auto* display = static_cast<LvglDisplay*>(lv_event_get_user_data(event));
+                const auto generation = display->image_popup_generation_;
+                Application::GetInstance().Schedule(
+                    [display, generation]() { display->CloseImagePopup(generation); });
+            },
+            LV_EVENT_CLICKED, this);
+    }
+    ClearImagePopupLocked();
+    ++image_popup_generation_;
+    image_popup_image_ = std::move(image);
+    lv_obj_set_size(image_popup_, screen_width, screen_height);
+    lv_image_set_src(image_popup_picture_, image_popup_image_->image_dsc());
+    // Cover the screen while preserving aspect ratio, rounding up to avoid edge gaps.
+    const int scale =
+        std::max((screen_width * 256 + descriptor->header.w - 1) / descriptor->header.w,
+                 (screen_height * 256 + descriptor->header.h - 1) / descriptor->header.h);
+    lv_image_set_scale(image_popup_picture_, std::max(1, scale));
+    lv_obj_center(image_popup_picture_);
+    const int button_size = std::min(40, std::min(screen_width, screen_height));
+    lv_obj_set_size(image_popup_close_, button_size, button_size);
+    lv_obj_align(image_popup_close_, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_move_foreground(image_popup_close_);
+    lv_obj_move_foreground(image_popup_);
+    lv_obj_remove_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LvglDisplay::ClearImagePopupLocked() {
+    // Caller must hold the display lock. Detach before freeing source memory.
+    if (image_popup_) {
+        lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
+        lv_image_set_src(image_popup_picture_, nullptr);
+    }
+    if (image_popup_image_) {
+        lv_image_cache_drop(image_popup_image_->image_dsc());
+        image_popup_image_.reset();
+    }
+}
+
+void LvglDisplay::CloseImagePopup(uint32_t generation) {
+    if (!Lock(30000)) {
+        ESP_LOGE(TAG, "Failed to lock display to close image popup");
+        return;
+    }
+    auto unlock = [](LvglDisplay* display) { display->Unlock(); };
+    std::unique_ptr<LvglDisplay, decltype(unlock)> lock(this, unlock);
+    // Ignore a duplicate click or a close queued before a newer image was displayed.
+    if (generation != image_popup_generation_ || !image_popup_image_) {
+        return;
+    }
+    ClearImagePopupLocked();
+    ESP_LOGI(TAG, "Image popup closed; image source and caches released");
 }
 
 void LvglDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {}

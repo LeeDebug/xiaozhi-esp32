@@ -24,6 +24,9 @@ public:
     virtual void SetStatus(const char* status);
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string& notification, int duration_ms = 3000);
+    // Takes ownership of the encoded image and shows a dismissible full-screen overlay.
+    void ShowImagePopup(void* data, size_t size);
+
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
@@ -33,6 +36,14 @@ public:
     bool SetTextFont(std::shared_ptr<LvglFont> text_font);
 
 protected:
+    // Popup widgets are retained; closing releases only the image and its caches.
+    lv_obj_t* image_popup_ = nullptr;
+    lv_obj_t* image_popup_picture_ = nullptr;
+    lv_obj_t* image_popup_close_ = nullptr;
+    std::unique_ptr<LvglImage> image_popup_image_;
+    uint32_t image_popup_generation_ = 0;
+    void ClearImagePopupLocked();
+    void CloseImagePopup(uint32_t generation);
     esp_pm_lock_handle_t pm_lock_ = nullptr;
     lv_display_t* display_ = nullptr;
 

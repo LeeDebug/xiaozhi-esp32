@@ -259,7 +259,7 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
         .panel_handle = panel,
         .control_handle = nullptr,
         .buffer_size = static_cast<uint32_t>(width_ * height_),
-        .double_buffer = true,
+        .double_buffer = false,
         .hres = static_cast<uint32_t>(width_),
         .vres = static_cast<uint32_t>(height_),
         .monochrome = false,

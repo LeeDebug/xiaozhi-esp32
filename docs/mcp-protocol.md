@@ -268,3 +268,44 @@ sequenceDiagram
 ```
 
 This document summarizes the MCP interaction flow in this project. For exact parameter shapes, behavior, and available tools, refer to `McpServer::AddCommonTools` / `AddUserOnlyTools` in `main/mcp_server.cc` and the per-board `InitializeTools` implementations.
+
+
+## 知识库图片全屏显示
+
+固件提供普通（对 AI 可见）工具 `self.screen.show_image`，参数为 `url`。
+知识库检索在服务端完成：用户询问图片时，先检索对应图片记录，找到后返回可由设备访问的
+HTTP/HTTPS 图片直链，并调用设备工具；仅将网址写入聊天文本不会打开弹窗。
+未找到图片时应说明没有匹配结果，不要编造网址。本仓库不包含知识库服务端，需在服务端
+提示词或检索工作流中接入这一步。
+
+MCP 请求（内层 payload，WebSocket 和 MQTT/UDP 使用相同内容）：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "method": "tools/call",
+  "params": {
+    "name": "self.screen.show_image",
+    "arguments": {"url": "https://your-image-host.example/knowledge/example.png"}
+  }
+}
+```
+
+- 支持 LVGL 彩色屏幕，独立于截图配置与聊天显示风格。OLED、无屏幕、Emote 显示不注册此工具。
+- 支持 PNG 和基线 JPEG；原始 ESP32 目标仅支持 PNG。不支持渐进 JPEG、网页链接或需要登录的图片。
+- 图片文件最多 1 MiB，宽高各最多 2048 像素，总像素最多 1048576。建议服务端按屏幕尺寸生成缩略图，避免内存不足。
+- 有 PSRAM 的设备仅在 PSRAM 分配图片下载缓冲区，PSRAM 不足时返回错误；无 PSRAM 的目标使用片内 RAM。
+- 新增弹窗显示和关闭操作必须成功获取显示锁；点击回调由 LVGL port 的锁保护，图片释放调度到主任务后再次加锁。
+- 下载在低优先级后台线程进行，一次最多下载一张；重复并发请求返回错误。单次读取超时为 10 秒，下载循环期限为 30 秒。
+- 弹窗覆盖整个实际屏幕，图片居中、保持比例并铺满屏幕，超出屏幕的边缘会被裁切；右上角关闭按钮覆盖于图片之上。关闭时隐藏并复用弹窗控件；关闭或替换图片时先解绑图片来源，再释放图片及解码缓存。
+- 下载或解码失败保留原弹窗并通过 MCP 返回错误；成功结果为 `true`。设备需要已有的触摸/指针输入才能点击关闭按钮。
+
+服务端提示词示例：
+
+> 用户要求查看某个图片时，先检索知识库。如果找到匹配图片，使用其可访问的图片直链调用
+> self.screen.show_image，并告诉用户图片已展示。知识库没有匹配图片时说明未找到。
+
+硬件验收：在触摸屏上分别测试横图、竖图、PNG/JPEG、重复展示与关闭；确认弹窗尺寸与
+屏幕相同、关闭后恢复聊天界面，播放语音时下载不会阻塞主事件循环。再测试 404、截断响应、
+超大文件、损坏图片、无匹配结果，以及 WebSocket 和 MQTT/UDP 两种连接下的工具调用。
