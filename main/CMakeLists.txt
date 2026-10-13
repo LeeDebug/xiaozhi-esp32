@@ -1055,6 +1055,8 @@ idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
+                        # ESP-IDF scans dependencies before CONFIG_* options are loaded.
+                        fb_gfx
                         esp_pm
                         esp_psram
                         esp_netif

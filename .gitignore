@@ -1,5 +1,6 @@
 tmp/
-components/
+components/*
+!components/fb_gfx/
 managed_components/
 build/
 dist/

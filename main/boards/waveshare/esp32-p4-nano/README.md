@@ -68,12 +68,25 @@ to the left of the Wi-Fi, battery, mute, and settings slots, separate from statu
 The legacy `HERDSMAN_UI_SHOW_LEFT_LOGO` and `HERDSMAN_UI_SHOW_RIGHT_BUTTONS`
 switches now control the audio/control column and production chart respectively.
 
-The 33 orange bars keep a fixed waveform silhouette. Their heights scale together
-with microphone amplitude, or playback PCM amplitude while speaking. A board-local
-ES8311 subclass publishes mean absolute PCM levels through atomics; the LVGL timer
-consumes them at 40 Hz with a fast attack and smooth decay. The sound-driven height
-variation has 2x visual gain, with a shared limit to preserve the silhouette and
-keep it clear of the chat button. This is a decorative
+The 33 orange bars are drawn by `fb_gfx` into one fixed LVGL RGB565 canvas,
+not separate LVGL objects. Its aligned buffer is allocated once (PSRAM preferred,
+8-bit memory fallback), reused for all frames, and freed with the display.
+The adapter accounts for LVGL row stride and the component's high-byte-first
+RGB565 writes. Each update clears and draws only this buffer, then invalidates
+one canvas area, avoiding per-bar layout changes and dirty-region overflow.
+The `fb_gfx` component declares `esp_libc` on ESP-IDF 6 and `newlib` on
+ESP-IDF 5 directly in its CMakeLists.txt. No project-side compatibility component
+is needed.
+
+The bars keep a fixed waveform silhouette. Their heights scale together
+with microphone amplitude only in the listening state. Speaking and all other
+states immediately reset to the minimum (quiet) silhouette without a decay tail;
+playback PCM never animates the meter. A board-local ES8311 subclass publishes mean
+absolute PCM levels through atomics; the LVGL timer consumes them at 40 Hz with a
+fast attack and smooth decay while listening. The sound-driven height variation
+uses a 4x gain, twice the previous 2x gain, while the quiet silhouette stays
+unchanged. A shared limit preserves the silhouette and keeps it clear of the
+chat button. This is a decorative
 amplitude meter, not a frequency spectrum or calibrated sound-pressure meter.
 It allocates no audio buffers and never reads the microphone from the UI thread.
 
@@ -92,8 +105,9 @@ python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/board
 ```
 
 For this firmware's include layout, use `"lvgl.h"` in the generated C file's
-`LV_BUILD_TEST` include branch as well. Board Kconfig selects the chart widget
+`LV_BUILD_TEST` include branch as well. Board Kconfig selects the canvas and chart widgets
 and Montserrat 14 tick font; no generated sdkconfig should be edited by hand.
 Hardware checks: logo transparency, ruler alignment on both LCD sizes, settings
-and chat touch targets, microphone/playback response, silence decay, interruption,
+and chat touch targets, listening response, doubled excursion, minimum bars while speaking or idle,
+silence decay, interruption,
 and reconnection. A build alone does not validate those behaviors.

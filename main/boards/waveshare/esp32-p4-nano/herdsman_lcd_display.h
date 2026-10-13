@@ -34,7 +34,12 @@ private:
     int system_bubble_width_ = kMaxSystemBubbleWidth;
 
     static constexpr int kAudioBarCount = 33;
-    lv_obj_t* audio_bars_[kAudioBarCount] = {};
+    lv_obj_t* audio_canvas_ = nullptr;
+    lv_draw_buf_t audio_canvas_draw_buf_ = {};
+    uint8_t* audio_canvas_buffer_ = nullptr;
+    int audio_canvas_width_ = 0;
+    int audio_canvas_height_ = 0;
+    int audio_canvas_last_scale_ = -1;
     lv_timer_t* audio_meter_timer_ = nullptr;
     int audio_meter_height_ = 160;
     int audio_level_ = 0;
@@ -42,6 +47,7 @@ private:
     void CreateAudioPanel(lv_obj_t* parent);
     void CreateProductionChart(lv_obj_t* parent);
     void UpdateAudioMeter();
+    void DrawAudioMeter(int scale);
 
     lv_obj_t* chat_list_ = nullptr;
     lv_obj_t* standby_panel_ = nullptr;

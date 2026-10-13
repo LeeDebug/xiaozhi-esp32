@@ -14,7 +14,11 @@
 #include "config.h"
 #include "display/lvgl_display/lvgl_theme.h"
 
+#include <esp_heap_caps.h>
+#include <esp_log.h>
+#include <fb_gfx.h>
 #include <material_symbols.h>
+#include <src/misc/cache/lv_cache.h>
 #include <wifi_manager.h>
 
 #include <algorithm>
@@ -29,6 +33,12 @@ LV_IMAGE_DECLARE(logo);
 LV_FONT_DECLARE(font_herdsman_ui_30_4);
 
 namespace {
+// fb_gfx emits RGB565 high byte first; the LVGL RGB565 canvas needs native little endian.
+uint16_t CanvasGfxColor(uint32_t rgb) {
+    const uint16_t rgb565 = ((rgb >> 8) & 0xF800) | ((rgb >> 5) & 0x07E0) | ((rgb >> 3) & 0x001F);
+    return static_cast<uint16_t>((rgb565 << 8) | (rgb565 >> 8));
+}
+
 // 以 % 开头的 MCP / 函数调用中间态(如 "% self.production.lights.get...")不适合直接上屏.
 bool IsToolCallNoise(const char* s) {
     if (s == nullptr || s[0] == '\0') {
@@ -236,6 +246,11 @@ HerdsmanLcdDisplay::~HerdsmanLcdDisplay() {
     if (audio_meter_timer_ != nullptr) {
         lv_timer_delete(audio_meter_timer_);
     }
+    if (audio_canvas_ != nullptr) {
+        lv_image_cache_drop(&audio_canvas_draw_buf_);
+        lv_obj_delete(audio_canvas_);
+    }
+    heap_caps_free(audio_canvas_buffer_);
 }
 
 void HerdsmanLcdDisplay::SetupUI() {
@@ -441,14 +456,37 @@ void HerdsmanLcdDisplay::CreateAudioPanel(lv_obj_t* parent) {
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     audio_meter_height_ = std::min(180, (static_cast<int>(LV_VER_RES) - kTopBarHeight - 160) / 2);
     const int spacing = std::max(3, (side_column_width_ - 48) / kAudioBarCount);
-    for (int i = 0; i < kAudioBarCount; ++i) {
-        audio_bars_[i] = lv_obj_create(panel);
-        lv_obj_remove_style_all(audio_bars_[i]);
-        lv_obj_set_style_bg_color(audio_bars_[i], lv_color_hex(kAccent), 0);
-        lv_obj_set_style_bg_opa(audio_bars_[i], LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(audio_bars_[i], 2, 0);
-        lv_obj_set_size(audio_bars_[i], std::max(2, spacing / 3), 4);
-        lv_obj_align(audio_bars_[i], LV_ALIGN_CENTER, (i - kAudioBarCount / 2) * spacing, -48);
+    const int bar_width = std::max(2, spacing / 3);
+    audio_canvas_width_ = (kAudioBarCount - 1) * spacing + bar_width + 4;
+    audio_canvas_height_ = std::max(
+        3,
+        std::min(audio_meter_height_ * 2, static_cast<int>(LV_VER_RES) - kTopBarHeight - 40 - 112));
+    const uint32_t stride =
+        lv_draw_buf_width_to_stride(audio_canvas_width_, LV_COLOR_FORMAT_RGB565);
+    const size_t buffer_size = stride * audio_canvas_height_;
+    const size_t alignment = std::max<size_t>(LV_DRAW_BUF_ALIGN, alignof(uint16_t));
+    audio_canvas_buffer_ = static_cast<uint8_t*>(
+        heap_caps_aligned_alloc(alignment, buffer_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (audio_canvas_buffer_ == nullptr) {
+        audio_canvas_buffer_ =
+            static_cast<uint8_t*>(heap_caps_aligned_alloc(alignment, buffer_size, MALLOC_CAP_8BIT));
+    }
+    if (audio_canvas_buffer_ != nullptr &&
+        lv_draw_buf_init(&audio_canvas_draw_buf_, audio_canvas_width_, audio_canvas_height_,
+                         LV_COLOR_FORMAT_RGB565, stride, audio_canvas_buffer_,
+                         buffer_size) == LV_RESULT_OK) {
+        audio_canvas_ = lv_canvas_create(panel);
+        lv_obj_remove_style_all(audio_canvas_);
+        lv_canvas_set_draw_buf(audio_canvas_, &audio_canvas_draw_buf_);
+        lv_obj_clear_flag(audio_canvas_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(audio_canvas_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_align(audio_canvas_, LV_ALIGN_CENTER, 0, -48);
+        DrawAudioMeter(100);
+    } else {
+        heap_caps_free(audio_canvas_buffer_);
+        audio_canvas_buffer_ = nullptr;
+        ESP_LOGE("HerdsmanDisplay", "Unable to allocate audio canvas (%u bytes)",
+                 static_cast<unsigned>(buffer_size));
     }
     lv_obj_t* chat_button =
         CreateIconTextButton(panel, MATERIAL_SYMBOLS_MIC, "开始对话", theme->text_font()->font(),
@@ -463,26 +501,57 @@ void HerdsmanLcdDisplay::CreateAudioPanel(lv_obj_t* parent) {
 
 void HerdsmanLcdDisplay::UpdateAudioMeter() {
     const int input = HerdsmanAudioMeter::Consume(false);
-    const int output = HerdsmanAudioMeter::Consume(true);
+    // Drain playback telemetry without displaying it.
+    HerdsmanAudioMeter::Consume(true);
     const auto state = Application::GetInstance().GetDeviceState();
-    const int target = state == kDeviceStateSpeaking ? output : input;
+    if (state != kDeviceStateListening) {
+        audio_level_ = 0;
+        DrawAudioMeter(100);
+        return;
+    }
+    const int target = input;
     // Fast attack and gentle release, with no allocations or audio reads in the UI task.
     audio_level_ = target > audio_level_ ? target : (audio_level_ * 7 + target) / 8;
+    if (audio_canvas_ == nullptr) {
+        return;
+    }
+    // Double the previous 2x excursion, preserving the quiet silhouette.
+    const int scale =
+        std::min(100 + 4 * audio_level_, audio_canvas_height_ * 1100 / audio_meter_height_);
+    DrawAudioMeter(scale);
+}
+
+void HerdsmanLcdDisplay::DrawAudioMeter(int scale) {
+    if (audio_canvas_ == nullptr || scale == audio_canvas_last_scale_) {
+        return;
+    }
     constexpr int profile[kAudioBarCount] = {22, 12, 18, 34, 16, 10, 24,  30, 20, 44, 90,
                                              50, 34, 42, 58, 28, 62, 100, 70, 44, 24, 16,
                                              12, 38, 20, 10, 16, 28, 36,  20, 26, 18, 12};
-    // Double the sound-driven excursion, keeping the quiet silhouette unchanged.
-    // Clamp the shared scale (rather than individual bars) to preserve its shape.
-    const int max_height = std::max(
-        3,
-        std::min(audio_meter_height_ * 2, static_cast<int>(LV_VER_RES) - kTopBarHeight - 40 - 112));
-    const int scale = std::min(100 + 2 * audio_level_, max_height * 1100 / audio_meter_height_);
+    // fb_gfx has no stride field. Include row padding in its logical width,
+    // while LVGL keeps the visible canvas width in the image header.
+    fb_data_t framebuffer = {};
+    framebuffer.width = static_cast<int>(audio_canvas_draw_buf_.header.stride / 2);
+    framebuffer.height = audio_canvas_height_;
+    framebuffer.bytes_per_pixel = 2;
+    framebuffer.format = FB_RGB565;
+    framebuffer.data = audio_canvas_buffer_;
+    fb_gfx_fillRect(&framebuffer, 0, 0, framebuffer.width, framebuffer.height,
+                    CanvasGfxColor(kPageBackground));
+    const int spacing = std::max(3, (side_column_width_ - 48) / kAudioBarCount);
+    const int bar_width = std::max(2, spacing / 3);
     for (int i = 0; i < kAudioBarCount; ++i) {
-        if (audio_bars_[i] != nullptr) {
-            const int height = std::max(3, profile[i] * audio_meter_height_ * scale / 110000);
-            lv_obj_set_height(audio_bars_[i], height);
-        }
+        const int height =
+            std::clamp(profile[i] * audio_meter_height_ * scale / 110000, 3, audio_canvas_height_);
+        const int x = 2 + i * spacing;
+        const int y = (audio_canvas_height_ - height) / 2;
+        fb_gfx_fillRect(&framebuffer, x, y, bar_width, height, CanvasGfxColor(kAccent));
     }
+    audio_canvas_last_scale_ = scale;
+    lv_draw_buf_flush_cache(&audio_canvas_draw_buf_, nullptr);
+    lv_image_cache_drop(&audio_canvas_draw_buf_);
+    // Only one fixed canvas area is invalidated; no per-bar layout updates.
+    lv_obj_invalidate(audio_canvas_);
 }
 
 void HerdsmanLcdDisplay::CreateProductionChart(lv_obj_t* parent) {
@@ -876,6 +945,14 @@ void HerdsmanLcdDisplay::UpdateHomeState() {
         lv_obj_remove_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(standby_panel_, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // Reset immediately on state changes rather than waiting for the next meter tick.
+    if (state != kDeviceStateListening) {
+        audio_level_ = 0;
+        HerdsmanAudioMeter::Consume(false);
+        HerdsmanAudioMeter::Consume(true);
+        DrawAudioMeter(100);
     }
 
     const bool chat_active = state == kDeviceStateConnecting || state == kDeviceStateListening ||
