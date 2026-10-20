@@ -1,5 +1,26 @@
 # Waveshare ESP32-P4-NANO
 
+## Audio device selection
+
+Set `AUDIO_USE_USB_UAC` in this board's `config.h` before building:
+
+- `1` (default): use a USB UAC 1.0 microphone and speaker, 48 kHz/16-bit PCM.
+- `0`: use the original onboard microphone, ES8311 codec and speaker header,
+  with 24 kHz capture and playback.
+
+The switch selects both capture and playback together. Both paths publish audio
+levels to the Herdsman UI. Onboard mode restores the board-local configuration
+and `HerdsmanAudioCodec` wrapper from commit `bc1ada61`, the merge base with
+`yishen_v2.4.2__lcd8.8__2.0`. It uses the current shared ES8311 driver, I2C1
+(SDA GPIO7 / SCL GPIO8), MCLK GPIO13, WS GPIO10, BCLK GPIO12, DIN GPIO11,
+DOUT GPIO9 and PA GPIO53. The same I2C bus is shared with touch, camera and
+backlight. USB UAC implementation is excluded by the preprocessor in onboard
+mode, so no UAC USB Host tasks are started. The UAC component dependency and
+its build configuration remain available for switching back to USB mode.
+
+This is a build-time choice; change the macro and rebuild to switch devices.
+Verify capture, playback and the audio level display with the selected hardware.
+
 ## USB audio
 
 Audio capture and playback use the ESP32-P4 USB Host controller through the
@@ -7,8 +28,8 @@ board's Type-A USB 2.0 OTG connector. Connect a USB Audio Class 1.0 sound card
 with both a microphone and speaker/headphone output directly to that port.
 USB hub support is not enabled in the current firmware configuration.
 The Type-C connector is for power, flashing and UART
-debugging; the onboard microphone, ES8311 codec, and speaker header are no
-longer used by this firmware variant.
+debugging; the onboard microphone, ES8311 codec, and speaker header are not
+used when `AUDIO_USE_USB_UAC=1`.
 
 The UAC adapter accepts 48 kHz, 16-bit PCM with one or two channels in each
 direction. It downmixes stereo microphone audio to mono and duplicates mono

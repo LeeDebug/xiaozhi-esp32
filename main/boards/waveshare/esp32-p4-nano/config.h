@@ -1,9 +1,9 @@
 /*
  * @file config.h
- * @brief ESP32-P4-Nano 板级配置总表:USB 音频/按键/Modbus/LCD/显示/Herdsman UI 开关与色板.
+ * @brief ESP32-P4-Nano 板级配置总表:音频/按键/Modbus/LCD/显示/Herdsman UI 开关与色板.
  *
  * 使用说明:
- * - 音频: ESP32-P4 USB Host Type-A 口连接 UAC 1.0 音频设备, 48kHz/16-bit PCM.
+ * - 音频: AUDIO_USE_USB_UAC=1 使用 USB UAC; =0 使用原有板载 ES8311 音频设备.
  * - 按键: BOOT_BUTTON_GPIO 为配网/对话复用键(见 esp32-p4-nano.cc InitializeButtons).
  * - 产线: PRODUCTION_MODBUS_* 为 UART1 的端口与 TX/RX 引脚, 波特率等见 production_modbus.cc.
  * - 屏幕: LCD_TYPE 二选一 —— OTA7290B(8.8寸 480x1920) / JD9365(10.1寸 800x1280),
@@ -16,9 +16,30 @@
 #include <driver/gpio.h> // GPIO_NUM_x / GPIO_NUM_NC 类型定义
 #include <driver/uart.h> // UART_NUM_1 等串口号定义
 
-/* ===== 外设 I2C:触摸/摄像头/背光共用 I2C1; 板载 ES8311 不再参与音频 ===== */
+/* ===== 音频设备选择: 1=USB UAC(48kHz/16-bit), 0=板载 ES8311(24kHz) ===== */
+#define AUDIO_USE_USB_UAC 1
+#if AUDIO_USE_USB_UAC != 0 && AUDIO_USE_USB_UAC != 1
+#error "AUDIO_USE_USB_UAC must be 0 or 1"
+#endif
+
+/* ===== 外设 I2C:触摸/摄像头/背光共用 I2C1; 板载模式下也供 ES8311 使用 ===== */
 #define PERIPHERAL_I2C_SDA_PIN GPIO_NUM_7
 #define PERIPHERAL_I2C_SCL_PIN GPIO_NUM_8
+
+#if !AUDIO_USE_USB_UAC
+/* 原有板载音频配置, 沿用分叉点 bc1ada61 的采样率与引脚. */
+#define AUDIO_INPUT_SAMPLE_RATE 24000
+#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_13
+#define AUDIO_I2S_GPIO_WS GPIO_NUM_10
+#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_12
+#define AUDIO_I2S_GPIO_DIN GPIO_NUM_11
+#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_9
+#define AUDIO_CODEC_PA_PIN GPIO_NUM_53
+#define AUDIO_CODEC_I2C_SDA_PIN PERIPHERAL_I2C_SDA_PIN
+#define AUDIO_CODEC_I2C_SCL_PIN PERIPHERAL_I2C_SCL_PIN
+#define AUDIO_CODEC_ES8311_ADDR ES8311_CODEC_DEFAULT_ADDR
+#endif
 
 /* ===== 按键: BOOT 键 —— 启动期短按进配网, 运行期短按切换对话(见 InitializeButtons) ===== */
 #define BOOT_BUTTON_GPIO        GPIO_NUM_35

@@ -1,3 +1,7 @@
+#include "config.h"
+
+#if AUDIO_USE_USB_UAC
+
 #include "usb_uac_audio_codec.h"
 
 #include "herdsman_audio_meter.h"
@@ -486,3 +490,5 @@ void UsbUacAudioCodec::OutputData(std::vector<int16_t>& data) {
     AudioCodec::OutputData(data);
     HerdsmanAudioMeter::Publish(data, output_channels(), true);
 }
+
+#endif  // AUDIO_USE_USB_UAC

@@ -3,7 +3,7 @@
  * @brief 微雪 ESP32-P4-Nano 开发板实现:音频/显示/触摸/摄像头/按键/背光/Modbus 总装.
  *
  * 硬件链路一览:
- * - 音频: ESP32-P4 USB Host 接 Type-A UAC 1.0 麦克风/扬声器.
+ * - 音频: config.h 的 AUDIO_USE_USB_UAC 选择 USB UAC 或原有板载 ES8311.
  * - 显示: MIPI-DSI 面板(OTA7290B 8.8寸 / JD9365 10.1寸二选一) + `HerdsmanLcdDisplay`.
  * - 背光: `CustomBacklight` 经 I2C(0x45/0x96) 写亮度.
  * - 触摸: GT911 经同一 I2C 总线接入 LVGL.
@@ -18,7 +18,13 @@
 #else
 #include "wifi_board.h"
 #endif
+#include "config.h"
+#if AUDIO_USE_USB_UAC
 #include "usb_uac_audio_codec.h"
+#else
+#include "codecs/es8311_audio_codec.h"
+#include "herdsman_audio_meter.h"
+#endif
 #include "application.h"
 #include "herdsman_lcd_display.h"
 // #include "display/no_display.h"
@@ -35,7 +41,6 @@
 #include "esp_ldo_regulator.h"
 
 #include "esp_lcd_mipi_dsi.h"
-#include "config.h"
 #if LCD_TYPE == LCD_TYPE_OTA7290B
 #include <esp_lcd_ota7290b.h>
 #elif LCD_TYPE == LCD_TYPE_JD9365
@@ -55,6 +60,26 @@
 using WaveshareEsp32p4nanoBase = EthernetBoard;
 #else
 using WaveshareEsp32p4nanoBase = WifiBoard;
+#endif
+
+#if !AUDIO_USE_USB_UAC
+class HerdsmanAudioCodec : public Es8311AudioCodec {
+public:
+    using Es8311AudioCodec::Es8311AudioCodec;
+
+    bool InputData(std::vector<int16_t>& data) override {
+        const bool success = Es8311AudioCodec::InputData(data);
+        if (success) {
+            HerdsmanAudioMeter::Publish(data, input_channels(), false);
+        }
+        return success;
+    }
+
+    void OutputData(std::vector<int16_t>& data) override {
+        Es8311AudioCodec::OutputData(data);
+        HerdsmanAudioMeter::Publish(data, output_channels(), true);
+    }
+};
 #endif
 
 class CustomBacklight : public Backlight {
@@ -104,7 +129,7 @@ private:
     EspVideo* camera_ = nullptr;
     CustomBacklight *backlight_;
 
-    /** @brief 创建 I2C1 主机:挂载 GT911/OV5647-SCCB/背光芯片, 使能上拉. */
+    /** @brief 创建共享 I2C1 主机:外设与可选板载 ES8311 共用, 使能上拉. */
     void InitializePeripheralI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -411,9 +436,16 @@ public:
         InitializeProductionMcpTools();
     }
 
-    /** @brief 取 USB Host UAC 音频编解码器(静态单例). */
+    /** @brief 按 config.h 选择音频编解码器(静态单例). */
     virtual AudioCodec *GetAudioCodec() override {
+#if AUDIO_USE_USB_UAC
         static UsbUacAudioCodec audio_codec;
+#else
+        static HerdsmanAudioCodec audio_codec(
+            codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT,
+            AUDIO_I2S_GPIO_DIN, AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+#endif
         return &audio_codec;
     }
 
