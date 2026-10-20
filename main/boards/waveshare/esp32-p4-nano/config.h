@@ -1,9 +1,9 @@
 /*
  * @file config.h
- * @brief ESP32-P4-Nano 板级配置总表:音频/按键/Modbus/LCD/显示/Herdsman UI 开关与色板.
+ * @brief ESP32-P4-Nano 板级配置总表:USB 音频/按键/Modbus/LCD/显示/Herdsman UI 开关与色板.
  *
  * 使用说明:
- * - 音频: ES8311 经 I2C 控制 + I2S 传输, 采样率 24kHz, 引脚见 AUDIO_* 定义.
+ * - 音频: ESP32-P4 USB Host Type-A 口连接 UAC 1.0 音频设备, 48kHz/16-bit PCM.
  * - 按键: BOOT_BUTTON_GPIO 为配网/对话复用键(见 esp32-p4-nano.cc InitializeButtons).
  * - 产线: PRODUCTION_MODBUS_* 为 UART1 的端口与 TX/RX 引脚, 波特率等见 production_modbus.cc.
  * - 屏幕: LCD_TYPE 二选一 —— OTA7290B(8.8寸 480x1920) / JD9365(10.1寸 800x1280),
@@ -16,22 +16,9 @@
 #include <driver/gpio.h> // GPIO_NUM_x / GPIO_NUM_NC 类型定义
 #include <driver/uart.h> // UART_NUM_1 等串口号定义
 
-/* ===== 音频采样率:输入(麦克风)与输出(喇叭)均为 24kHz, 与 ES8311 编解码配置一致 ===== */
-#define AUDIO_INPUT_SAMPLE_RATE  24000  // 麦克风采集采样率(Hz)
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000  // 喇叭播放采样率(Hz)
-
-/* ===== 音频 I2S 引脚: MCLK 主时钟 / WS 声道选择 / BCLK 位时钟 / DIN(采)/DOUT(放) ===== */
-#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_13 // 主时钟输出给 ES8311
-#define AUDIO_I2S_GPIO_WS GPIO_NUM_10   // 左右声道切换(LRCK)
-#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_12 // I2S 位时钟
-#define AUDIO_I2S_GPIO_DIN  GPIO_NUM_11 // MCU <- Codec, 麦克风数据入
-#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_9  // MCU -> Codec, 播放数据出
-
-/* ===== 音频 Codec 控制:功放使能 + I2C 总线 + ES8311 从机地址 ===== */
-#define AUDIO_CODEC_PA_PIN       GPIO_NUM_53             // 功放 PA 使能脚, 拉高出声
-#define AUDIO_CODEC_I2C_SDA_PIN  GPIO_NUM_7              // Codec/触摸/摄像头/背光共用 I2C1 的 SDA
-#define AUDIO_CODEC_I2C_SCL_PIN  GPIO_NUM_8              // 共用 I2C1 的 SCL
-#define AUDIO_CODEC_ES8311_ADDR  ES8311_CODEC_DEFAULT_ADDR // ES8311 默认 7 位 I2C 地址
+/* ===== 外设 I2C:触摸/摄像头/背光共用 I2C1; 板载 ES8311 不再参与音频 ===== */
+#define PERIPHERAL_I2C_SDA_PIN GPIO_NUM_7
+#define PERIPHERAL_I2C_SCL_PIN GPIO_NUM_8
 
 /* ===== 按键: BOOT 键 —— 启动期短按进配网, 运行期短按切换对话(见 InitializeButtons) ===== */
 #define BOOT_BUTTON_GPIO        GPIO_NUM_35

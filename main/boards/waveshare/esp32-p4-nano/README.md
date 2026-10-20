@@ -1,5 +1,31 @@
 # Waveshare ESP32-P4-NANO
 
+## USB audio
+
+Audio capture and playback use the ESP32-P4 USB Host controller through the
+board's Type-A USB 2.0 OTG connector. Connect a USB Audio Class 1.0 sound card
+with both a microphone and speaker/headphone output directly to that port.
+USB hub support is not enabled in the current firmware configuration.
+The Type-C connector is for power, flashing and UART
+debugging; the onboard microphone, ES8311 codec, and speaker header are no
+longer used by this firmware variant.
+
+The UAC adapter accepts 48 kHz, 16-bit PCM with one or two channels in each
+direction. It downmixes stereo microphone audio to mono and duplicates mono
+playback to a stereo USB speaker. The firmware audio service performs its
+normal 48 kHz to 16 kHz microphone resampling. A device without a matching
+UAC 1.0 mode is logged and ignored. USB audio interfaces can be connected,
+removed, and reconnected while the application runs.
+UAC 2.0 devices (descriptor version `0x0200`) are detected before the UAC 1.0
+host driver opens them and are skipped. To use this firmware, select a UAC 1.0
+mode on the sound card if it provides one, or use a UAC 1.0 sound card.
+
+After flashing, verify microphone capture, playback, voice activation,
+interruption, reconnect, and simultaneous capture/playback with the intended
+USB sound card. Also check that the Type-A port supplies the
+sound card's required current. Firmware builds cannot validate USB device
+descriptors or power delivery.
+
 
 [ESP32-P4-NANO](https://www.waveshare.com/esp32-p4-nano.htm) is a small size and highly integrated development board designed by waveshare electronics based on ESP32-P4 chip
 
@@ -81,7 +107,7 @@ is needed.
 The bars keep a fixed waveform silhouette. Their heights scale together
 with microphone amplitude only in the listening state. Speaking and all other
 states immediately reset to the minimum (quiet) silhouette without a decay tail;
-playback PCM never animates the meter. A board-local ES8311 subclass publishes mean
+playback PCM never animates the meter. A board-local USB UAC codec publishes mean
 absolute PCM levels through atomics; the LVGL timer consumes them at 40 Hz with a
 fast attack and smooth decay while listening. The sound-driven height variation
 uses a 4x gain, twice the previous 2x gain, while the quiet silhouette stays

@@ -3,7 +3,7 @@
  * @brief 微雪 ESP32-P4-Nano 开发板实现:音频/显示/触摸/摄像头/按键/背光/Modbus 总装.
  *
  * 硬件链路一览:
- * - 音频: ES8311 经 I2C_NUM_1 控制, I2S 传输, 见 `config.h` 引脚定义.
+ * - 音频: ESP32-P4 USB Host 接 Type-A UAC 1.0 麦克风/扬声器.
  * - 显示: MIPI-DSI 面板(OTA7290B 8.8寸 / JD9365 10.1寸二选一) + `HerdsmanLcdDisplay`.
  * - 背光: `CustomBacklight` 经 I2C(0x45/0x96) 写亮度.
  * - 触摸: GT911 经同一 I2C 总线接入 LVGL.
@@ -18,10 +18,9 @@
 #else
 #include "wifi_board.h"
 #endif
-#include "codecs/es8311_audio_codec.h"
+#include "usb_uac_audio_codec.h"
 #include "application.h"
 #include "herdsman_lcd_display.h"
-#include "herdsman_audio_meter.h"
 // #include "display/no_display.h"
 #include "production_mcp_tools.h"
 #include "production_modbus.h"
@@ -58,32 +57,14 @@ using WaveshareEsp32p4nanoBase = EthernetBoard;
 using WaveshareEsp32p4nanoBase = WifiBoard;
 #endif
 
-class HerdsmanAudioCodec : public Es8311AudioCodec {
-public:
-    using Es8311AudioCodec::Es8311AudioCodec;
-
-    bool InputData(std::vector<int16_t>& data) override {
-        const bool success = Es8311AudioCodec::InputData(data);
-        if (success) {
-            HerdsmanAudioMeter::Publish(data, input_channels(), false);
-        }
-        return success;
-    }
-
-    void OutputData(std::vector<int16_t>& data) override {
-        Es8311AudioCodec::OutputData(data);
-        HerdsmanAudioMeter::Publish(data, output_channels(), true);
-    }
-};
-
 class CustomBacklight : public Backlight {
 public:
-    /** @brief 背光控制器, 复用 Codec I2C 总线, 每次设置亮度时临时挂载从机. */
+    /** @brief 背光控制器, 复用外设 I2C 总线, 每次设置亮度时临时挂载从机. */
     CustomBacklight(i2c_master_bus_handle_t i2c_handle)
         : Backlight(), i2c_handle_(i2c_handle) {}
 
 protected:
-    i2c_master_bus_handle_t i2c_handle_; // 复用的 I2C1 主机句柄(由 InitializeCodecI2c 创建)
+    i2c_master_bus_handle_t i2c_handle_; // 复用的 I2C1 主机句柄(由 InitializePeripheralI2c 创建)
 
     /** @brief 写背光芯片: 7位地址 0x45, 寄存器 0x96 后跟一字节亮度值. */
     virtual void SetBrightnessImpl(uint8_t brightness) override {
@@ -123,13 +104,13 @@ private:
     EspVideo* camera_ = nullptr;
     CustomBacklight *backlight_;
 
-    /** @brief 创建 I2C1 主机:挂载 ES8311/GT911/OV5647-SCCB/背光芯片, 使能上拉. */
-    void InitializeCodecI2c() {
+    /** @brief 创建 I2C1 主机:挂载 GT911/OV5647-SCCB/背光芯片, 使能上拉. */
+    void InitializePeripheralI2c() {
         // Initialize I2C peripheral
         i2c_master_bus_config_t i2c_bus_cfg = {
             .i2c_port = I2C_NUM_1,
-            .sda_io_num = AUDIO_CODEC_I2C_SDA_PIN,
-            .scl_io_num = AUDIO_CODEC_I2C_SCL_PIN,
+            .sda_io_num = PERIPHERAL_I2C_SDA_PIN,
+            .scl_io_num = PERIPHERAL_I2C_SCL_PIN,
             .clk_source = I2C_CLK_SRC_DEFAULT,
             .glitch_ignore_cnt = 7,
             .intr_priority = 0,
@@ -375,7 +356,7 @@ private:
         lvgl_port_add_touch(&touch_cfg);
         ESP_LOGI(TAG, "Touch panel initialized successfully");
     }
-    /** @brief 初始化 OV5647 摄像头: CSI 接口, SCCB 复用 Codec I2C, 复位/掉电脚悬空. */
+    /** @brief 初始化 OV5647 摄像头: CSI 接口, SCCB 复用外设 I2C, 复位/掉电脚悬空. */
     void InitializeCamera() {
         esp_video_init_csi_config_t base_csi_config = {
             .sccb_config = {
@@ -416,7 +397,7 @@ public:
     /** @brief 整板上电装配顺序:I2C→LCD→触摸→摄像头→按键→Modbus(地址0x01)→MCP工具. */
     WaveshareEsp32p4nano() :
         boot_button_(BOOT_BUTTON_GPIO) {
-        InitializeCodecI2c();
+        InitializePeripheralI2c();
         InitializeLCD();
         InitializeTouch();
         InitializeCamera();
@@ -430,11 +411,9 @@ public:
         InitializeProductionMcpTools();
     }
 
-    /** @brief 取 ES8311 音频编解码器(静态单例, I2S+PA 引脚见 config.h). */
+    /** @brief 取 USB Host UAC 音频编解码器(静态单例). */
     virtual AudioCodec *GetAudioCodec() override {
-        static HerdsmanAudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-                                            AUDIO_I2S_GPIO_MCLK, AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-                                            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+        static UsbUacAudioCodec audio_codec;
         return &audio_codec;
     }
 
