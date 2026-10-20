@@ -612,6 +612,11 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
 endchoice
 
+# Extend the component's symbol without changing its defaults for other boards.
+# The conditional range also upgrades an existing saved value of 4 on reconfigure.
+config UAC_FREQ_NUM_MAX
+    range 16 82 if BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
+
 choice XIAOZHI_NETWORK_TYPE
     prompt "Network Type"
     depends on BOARD_TYPE_WAVESHARE_ESP32_P4_NANO

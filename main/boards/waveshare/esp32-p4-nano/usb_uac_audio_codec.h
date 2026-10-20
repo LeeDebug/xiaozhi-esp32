@@ -3,6 +3,7 @@
 #include "audio_codec.h"
 
 #include <array>
+#include <condition_variable>
 #include <mutex>
 
 #include "freertos/queue.h"
@@ -55,6 +56,7 @@ private:
     void QueueUpdate();
 
     std::mutex mutex_;
+    std::condition_variable stream_cv_;
     QueueHandle_t events_ = nullptr;
     Stream input_;
     Stream output_;

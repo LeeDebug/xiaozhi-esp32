@@ -20,6 +20,24 @@ UAC 2.0 devices (descriptor version `0x0200`) are detected before the UAC 1.0
 host driver opens them and are skipped. To use this firmware, select a UAC 1.0
 mode on the sound card if it provides one, or use a UAC 1.0 sound card.
 
+Both release variants set `CONFIG_UAC_FREQ_NUM_MAX=16`. The board's Kconfig
+constraint also raises an older saved value of 4 to at least 16 during the next
+configuration step. Use the canonical `scripts/build.py` variant entry point
+when building. No generated `sdkconfig` files need to be edited by hand.
+Some UAC 1.0 microphones advertise six discrete rates with 48 kHz after the
+fourth entry; the driver's default capacity of four hides that mode. The adapter
+rejects truncated rate lists before starting the driver, since usb_host_uac 1.x
+also uses the untruncated count when selecting a stream. If a device advertises
+more than 16 rates, increase the option to at least the count in the error log
+(up to 82). Each alternate setting now logs its PCM format and 48 kHz support
+to distinguish an undersized host rate list from an unsupported device format.
+
+Playback waits for the control task to finish resuming an enabled USB stream
+(with a bounded timeout), so the first audio buffer after idle is not silently
+discarded while the resume event is still queued. A working startup sound alone
+does not verify the conversation path: microphone initialization must succeed
+before voice activation and speech upload can produce a spoken reply.
+
 After flashing, verify microphone capture, playback, voice activation,
 interruption, reconnect, and simultaneous capture/playback with the intended
 USB sound card. Also check that the Type-A port supplies the

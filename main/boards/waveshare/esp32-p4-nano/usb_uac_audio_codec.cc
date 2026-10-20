@@ -3,6 +3,7 @@
 #include "herdsman_audio_meter.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 
 #include "esp_log.h"
@@ -247,32 +248,49 @@ void UsbUacAudioCodec::OpenStream(bool input, uint8_t addr, uint8_t iface_num) {
     err = uac_host_get_device_info(handle, &info);
     uint8_t channels = 0;
     if (err == ESP_OK) {
-        for (int preferred_channels = 1; preferred_channels <= 2 && channels == 0;
-             ++preferred_channels) {
-            for (int alt_index = 1; alt_index <= info.iface_alt_num; ++alt_index) {
-                uac_host_dev_alt_param_t alt = {};
-                if (uac_host_get_device_alt_param(handle, alt_index, &alt) != ESP_OK ||
-                    alt.format != 1 || alt.bit_resolution != 16 || alt.subframe_size != 2 ||
-                    alt.channels != preferred_channels) {
-                    continue;
-                }
-                bool rate_supported = alt.sample_freq_type == 0
-                                          ? alt.sample_freq_lower <= kSampleRate &&
-                                                kSampleRate <= alt.sample_freq_upper
-                                          : false;
-                for (size_t i = 0;
-                     !rate_supported &&
-                     i < std::min<size_t>(alt.sample_freq_type,
-                                          sizeof(alt.sample_freq) / sizeof(alt.sample_freq[0]));
-                     ++i) {
-                    rate_supported = alt.sample_freq[i] == kSampleRate;
-                }
-                if (rate_supported) {
-                    channels = alt.channels;
-                    break;
-                }
+        // Inspect every alternate setting, even after finding a matching mode.
+        // usb_host_uac 1.x retains the advertised count after truncating its rate
+        // array and uses that count in device_start(). Do not enter that path
+        // with any truncated alternate setting.
+        for (int alt_index = 1; alt_index <= info.iface_alt_num; ++alt_index) {
+            uac_host_dev_alt_param_t alt = {};
+            err = uac_host_get_device_alt_param(handle, alt_index, &alt);
+            if (err != ESP_OK) {
+                ESP_LOGE(kTag, "Cannot inspect UAC %s alt %d: %s", input ? "mic" : "speaker",
+                         alt_index, esp_err_to_name(err));
+                uac_host_device_close(handle);
+                return;
+            }
+            const size_t rate_capacity = sizeof(alt.sample_freq) / sizeof(alt.sample_freq[0]);
+            if (alt.sample_freq_type > rate_capacity) {
+                ESP_LOGE(kTag,
+                         "UAC %s alt %d advertises %u rates, host stores only %u; "
+                         "set CONFIG_UAC_FREQ_NUM_MAX >= %u and reconfigure",
+                         input ? "mic" : "speaker", alt_index, alt.sample_freq_type,
+                         static_cast<unsigned>(rate_capacity), alt.sample_freq_type);
+                uac_host_device_close(handle);
+                return;
+            }
+            bool rate_supported = alt.sample_freq_type == 0 &&
+                                  alt.sample_freq_lower <= kSampleRate &&
+                                  kSampleRate <= alt.sample_freq_upper;
+            for (size_t i = 0; !rate_supported && i < alt.sample_freq_type; ++i) {
+                rate_supported = alt.sample_freq[i] == kSampleRate;
+            }
+            ESP_LOGI(kTag, "UAC %s alt %d: format=%u, %u ch, %u-bit/%u-byte, 48 kHz=%s",
+                     input ? "mic" : "speaker", alt_index, alt.format, alt.channels,
+                     alt.bit_resolution, alt.subframe_size, rate_supported ? "yes" : "no");
+            if (alt.format == 1 && alt.bit_resolution == 16 && alt.subframe_size == 2 &&
+                (alt.channels == 1 || alt.channels == 2) && rate_supported &&
+                (channels == 0 || alt.channels < channels)) {
+                channels = alt.channels;
             }
         }
+    } else {
+        ESP_LOGE(kTag, "Cannot inspect UAC %s: %s", input ? "mic" : "speaker",
+                 esp_err_to_name(err));
+        uac_host_device_close(handle);
+        return;
     }
     if (channels == 0) {
         ESP_LOGE(kTag, "UAC %s has no 48 kHz/16-bit mono or stereo PCM mode",
@@ -316,6 +334,7 @@ void UsbUacAudioCodec::CloseStream(uac_host_device_handle_t handle) {
     stream->channels = 0;
     stream->pending = false;
     stream->running = false;
+    stream_cv_.notify_all();
     uac_host_device_close(handle);
     ESP_LOGI(kTag, "UAC interface disconnected");
     lock.unlock();
@@ -341,6 +360,7 @@ void UsbUacAudioCodec::UpdateStreams() {
     };
     update(input_, input_enabled_);
     update(output_, output_enabled_);
+    stream_cv_.notify_all();
 }
 
 void UsbUacAudioCodec::QueueUpdate() {
@@ -414,8 +434,20 @@ int UsbUacAudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int UsbUacAudioCodec::Write(const int16_t* data, int samples) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!output_.running || output_.handle == nullptr) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!output_enabled_ || output_.handle == nullptr) {
+        return 0;
+    }
+    // EnableOutput schedules USB control work. Let that task resume the stream
+    // before consuming the first playback buffer, including after idle suspend.
+    // Waiting releases mutex_ so the control task can make progress.
+    if (!stream_cv_.wait_for(lock, std::chrono::milliseconds(kIoTimeoutMs), [this]() {
+            return output_.running || !output_enabled_ || output_.handle == nullptr;
+        })) {
+        ESP_LOGW(kTag, "UAC speaker resume timed out before playback");
+        return 0;
+    }
+    if (!output_enabled_ || !output_.running || output_.handle == nullptr) {
         return 0;
     }
     const int volume = std::clamp(output_volume_, 0, 100);
