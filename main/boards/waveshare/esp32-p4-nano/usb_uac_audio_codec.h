@@ -3,6 +3,7 @@
 #include "audio_codec.h"
 
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 
@@ -21,12 +22,21 @@ public:
     void SetOutputVolume(int volume) override;
     bool InputData(std::vector<int16_t>& data) override;
     void OutputData(std::vector<int16_t>& data) override;
+    void OutputData(std::vector<int16_t>& data, uint32_t generation) override;
+    bool HasHardwareAec() const override;
+    VoiceInterruptionConfig GetVoiceInterruptionConfig() const override;
+    void CancelOutput(uint32_t generation) override;
+    void ResumeOutput(uint32_t generation) override;
 
 protected:
     int Read(int16_t* dest, int samples) override;
     int Write(const int16_t* data, int samples) override;
 
 private:
+    int WriteGeneration(const int16_t* data, int samples, uint32_t generation);
+    std::atomic<uint32_t> output_generation_{0};
+    std::atomic<bool> output_cancelled_{false};
+    std::atomic<bool> output_flush_pending_{false};
     enum class EventType : uint8_t { ConnectInput, ConnectOutput, Disconnect, UpdateStreams };
     struct Event {
         EventType type;
@@ -56,11 +66,14 @@ private:
     void QueueUpdate();
 
     std::mutex mutex_;
+    std::mutex input_io_mutex_;
+    std::mutex output_io_mutex_;
     std::condition_variable stream_cv_;
     QueueHandle_t events_ = nullptr;
     Stream input_;
     Stream output_;
     // 10 ms of 48 kHz stereo PCM. Reused by the audio tasks, without allocations.
-    std::array<int16_t, 960> pcm_buffer_{};
+    std::array<int16_t, 960> input_buffer_{};
+    std::array<int16_t, 960> output_buffer_{};
     bool started_ = false;
 };

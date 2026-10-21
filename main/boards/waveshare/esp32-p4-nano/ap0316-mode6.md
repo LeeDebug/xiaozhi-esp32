@@ -127,3 +127,19 @@ AP 的 I2S 输出取决于模块自身固件；ESP32 端不通过 I2C 或 USB �
 5. 确认输出空闲关闭、再次播放、AP 断电再上电后均可恢复，且关闭输出不会停止 AP 输入。
 6. 接好 LINE_IN，在计划使用的播放音量下验证双讲、回声抑制与说话打断，检查参考不削顶。
    AP 录音有声、唤醒成功或固件编译成功均不能代替这一项声学验证。
+
+## 语音打断
+
+本板 `config.h` 中 `AP0316_HAS_HARDWARE_AEC=1` 与
+`AUDIO_VOICE_INTERRUPTION_ENABLED=1` 默认启用 AP 硬件 AEC 和本地 VAD 打断。
+连续人声确认时间默认 200 ms，播放起始保护默认 300 ms，均在该文件调整。
+TTS stop 与最后音频包之后保留默认 180 ms 的有限静默宽限，且播放队列排空后再回到监听，
+避免 MQTT/UDP 尾包稍晚到达时过早结束播放；对应 `AUDIO_VOICE_INTERRUPTION_PLAYBACK_DRAIN_MS`。
+LINE_IN 播放参考必须接好，否则小智自身声音可能被误判为用户打断。
+无需启用 `CONFIG_USE_DEVICE_AEC`，AP 输入仍为无独立参考通道的单声道。
+
+说话打断时保持 AP I2S1 输入运行，只静音 ES8311 的 PA、取消旧播放代，
+新回答开始前在输出任务清空 I2S0 TX DMA。服务端需要支持 realtime 监听与 abort。
+请实测只播放不说话、同时说话、连续多次打断、首音节完整性及下一回答恢复。
+切回普通板载输入输出使用 `AUDIO_DEVICE_ES8311`；若没有可用硬件 AEC，
+应关闭对应硬件 AEC 声明。更多 USB 模式1配置及参数见 [README](README.md)。

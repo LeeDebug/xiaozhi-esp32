@@ -32,6 +32,10 @@ public:
     virtual void OnOutput(std::function<void(std::vector<int16_t>&& data)> callback) = 0;
     virtual void OnVadStateChange(std::function<void(bool speaking)> callback) = 0;
 
+    // Optional per-fetch VAD observation; frame duration is audio time, not a
+    // retained boolean state. Engines without VAD leave this callback unused.
+    virtual void OnVadFrame(std::function<void(bool, uint32_t)>) {}
+
     virtual void EncodeWakeWordData() = 0;
     virtual bool GetWakeWordOpus(std::vector<uint8_t>& opus) = 0;
     virtual const std::string& GetLastDetectedWakeWord() const = 0;

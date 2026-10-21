@@ -22,8 +22,9 @@
 #include "audio_codec.h"
 #include "audio_debugger.h"
 #include "audio_engine.h"
-#include "protocol.h"
 #include "ogg_demuxer.h"
+#include "protocol.h"
+#include "voice_interruption.h"
 
 /*
  * There are two types of audio data flow:
@@ -82,6 +83,7 @@ struct AudioServiceCallbacks {
     std::function<void(void)> on_audio_testing_queue_full;
     // Fired when the decode/playback queues and their in-flight work are drained.
     std::function<void(void)> on_playback_drained;
+    std::function<void(uint32_t)> on_voice_interruption;
 };
 
 
@@ -95,6 +97,7 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp = 0;
+    uint32_t playback_generation = 0;
 };
 
 struct DebugStatistics {
@@ -124,7 +127,7 @@ public:
     bool IsAfeWakeWord();
 
     void EnableWakeWordDetection(bool enable);
-    void EnableVoiceProcessing(bool enable);
+    void EnableVoiceProcessing(bool enable, bool reset_playback = true);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
@@ -135,6 +138,14 @@ public:
     void PlaySound(const std::string_view& sound);
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
+    bool SupportsVoiceInterruption() const;
+    uint32_t GetPlaybackDrainMs() const { return interruption_config_.playback_drain_ms; }
+    void ArmVoiceInterruption();
+    void DisarmVoiceInterruption();
+    bool IsVoiceInterruptionPending(uint32_t generation);
+    // A receive-side session token protects packets racing with abort/reset.
+    uint32_t GetPlaybackGeneration();
+    bool PushTtsPacket(std::unique_ptr<AudioStreamPacket> packet, uint32_t generation);
     void SetModelsList(srmodel_list_t* models_list);
 
 private:
@@ -154,6 +165,7 @@ private:
     int encoder_duration_ms_ = OPUS_FRAME_DURATION_MS;
     int encoder_frame_size_ = 0;
     int encoder_outbuf_size_ = 0;
+    uint32_t decoder_generation_ = UINT32_MAX;  // Owned by OpusCodecTask.
     int decoder_sample_rate_ = 0;
     int decoder_duration_ms_ = OPUS_FRAME_DURATION_MS;
     int decoder_frame_size_ = 0;
@@ -182,7 +194,9 @@ private:
     std::deque<uint32_t> timestamp_queue_;
 
     bool audio_engine_initialized_ = false;
-    bool voice_detected_ = false;
+    std::atomic<bool> voice_detected_{false};
+    VoiceInterruption voice_interruption_;
+    VoiceInterruptionConfig interruption_config_;
 #if CONFIG_USE_DEVICE_AEC
     bool device_aec_enabled_ = true;
 #else
@@ -204,6 +218,7 @@ private:
     void CheckAndUpdateAudioPowerState();
     bool IsPlaybackDrainedLocked() const;
     bool MarkPlaybackDrainedLocked();
+    void HandleVadFrame(bool speech, uint32_t frame_ms);
 };
 
 #endif

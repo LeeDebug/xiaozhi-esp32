@@ -1,0 +1,100 @@
+test_board_menu_has_explicit_target_defaults (test_build.BoardMenuTests) ... ok
+test_board_menu_is_sorted_and_matches_cmake (test_build.BoardMenuTests) ... ok
+test_alientek_directory_keeps_atk_board_types (test_build.BoardSelectionTests) ... ok
+test_board_display_name_comes_from_kconfig_prompt (test_build.BoardSelectionTests) ... ok
+test_common_and_core_changes_select_all (test_build.BoardSelectionTests) ... ok
+test_docs_only_selects_none (test_build.BoardSelectionTests) ... ok
+test_m5stack_directory_can_omit_manufacturer_prefix (test_build.BoardSelectionTests) ... ok
+test_nested_manufacturer_board_path (test_build.BoardSelectionTests) ... ok
+test_new_manufacturer_directories_keep_existing_board_types (test_build.BoardSelectionTests) ... ok
+test_official_directory_can_keep_legacy_board_type (test_build.BoardSelectionTests) ... ok
+test_same_leaf_names_are_scoped_by_manufacturer (test_build.BoardSelectionTests) ... ok
+test_variant_name_disambiguates_shared_board_directory (test_build.BoardSelectionTests) ... ok
+test_relative_board_includes_exist (test_build.BoardSourceTests) ... FAIL
+test_blufi_expansion_disables_hotspot (test_build.BuildOptionTests) ... ok
+test_camera_board_defaults_are_declared_by_board_config (test_build.BuildOptionTests) ... ok
+test_camera_mirror_guard_is_settable_by_build_defaults (test_build.BuildOptionTests) ... ok
+test_configured_build_options_are_verified (test_build.BuildOptionTests) ... ok
+test_display_style_only_writes_board_supported_choices (test_build.BuildOptionTests) ... ok
+test_incompatible_wake_word_model_is_rejected (test_build.BuildOptionTests) ... ok
+test_language_normalization_and_option (test_build.BuildOptionTests) ... ok
+test_languages_are_discovered_from_build_configuration (test_build.BuildOptionTests) ... ok
+test_lcd_board_exposes_curated_display_options (test_build.BuildOptionTests) ... ok
+test_missing_esp_sr_kconfig_has_actionable_error (test_build.BuildOptionTests) ... ok
+test_non_default_style_disables_multiline_chat (test_build.BuildOptionTests) ... ok
+test_optional_usb_camera_options_require_camera_to_be_enabled (test_build.BuildOptionTests) ... ok
+test_supported_languages_match_kconfig_and_cmake (test_build.BuildOptionTests) ... ok
+test_unknown_semantic_build_option_is_rejected (test_build.BuildOptionTests) ... ok
+test_user_options_override_board_options (test_build.BuildOptionTests) ... ok
+test_wake_word_alias_selects_target_engine (test_build.BuildOptionTests) ... ok
+test_wake_word_disabled_removes_target_default_model (test_build.BuildOptionTests) ... ok
+test_wake_words_are_read_from_esp_sr_kconfig (test_build.BuildOptionTests) ... ok
+test_build_does_not_create_zip_by_default (test_build.CliTests) ... ok
+test_build_options_json_is_forwarded (test_build.CliTests) ... ok
+test_language_and_wake_word_are_forwarded (test_build.CliTests) ... ok
+test_list_boards_prints_boards_and_multi_variants (test_build.CliTests) ... ok
+test_list_languages_supports_json (test_build.CliTests) ... ok
+test_list_wake_words_supports_json (test_build.CliTests) ... ok
+test_no_arguments_prints_help_without_building (test_build.CliTests) ... ok
+test_zip_flag_is_forwarded (test_build.CliTests) ... ok
+test_duplicate_reported_identifiers_fail_collection (test_build.InvalidConfigTests) ... ok
+test_invalid_reported_identifiers_are_rejected (test_build.InvalidConfigTests) ... ok
+test_invalid_version_rule_fails_collection (test_build.InvalidConfigTests) ... ok
+test_missing_reported_type_fails_collection (test_build.InvalidConfigTests) ... ok
+test_merge_bin_enables_preview_mode (test_build.PreviewTargetTests) ... ok
+test_stage_marker_is_only_emitted_when_enabled (test_build.PreviewTargetTests) ... ok
+test_changed_cmake_target_runs_fullclean_only (test_build.TargetConfigurationTests) ... ok
+test_configure_build_replaces_stale_sdkconfig_backup (test_build.TargetConfigurationTests) ... ok
+test_configure_build_uses_all_cmake_values_in_one_run (test_build.TargetConfigurationTests) ... ok
+test_same_target_does_not_clean_build_directory (test_build.TargetConfigurationTests) ... ok
+test_sync_vscode_target_preserves_other_settings (test_build.TargetConfigurationTests) ... ok
+test_sync_vscode_target_skips_missing_settings (test_build.TargetConfigurationTests) ... ok
+test_interactive_selection_accepts_number (test_build.VariantSelectionTests) ... ok
+test_non_interactive_selection_requires_name (test_build.VariantSelectionTests) ... [ERROR] Multiple variants found in non-interactive mode; select one with --name.
+ok
+test_chip_defaults_only_contain_target_overrides (test_build.VersionTests) ... ok
+test_current_matrix_uniqueness_and_p4_variants (test_build.VersionTests) ... [WARN] Ambiguous board config for lilygo/t-cameraplus-s3 (target=esp32s3), target-matched candidates=['CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1', 'CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_2'], selecting first: CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
+[WARN] Explicit board config CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_4_3C does not exist in Kconfig; resolving it from BOARD_DIR='waveshare/esp32-s3-touch-lcd-4.3c' instead.
+[WARN] Ambiguous board config for lilygo/t-cameraplus-s3 (target=esp32s3), target-matched candidates=['CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1', 'CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_2'], selecting first: CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
+[WARN] Explicit board config CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_4_3C does not exist in Kconfig; resolving it from BOARD_DIR='waveshare/esp32-s3-touch-lcd-4.3c' instead.
+[WARN] Ambiguous board config for lilygo/t-cameraplus-s3 (target=esp32s3), target-matched candidates=['CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1', 'CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_2'], selecting first: CONFIG_BOARD_TYPE_LILYGO_T_CAMERAPLUS_S3_V1_0_V1_1
+[WARN] Explicit board config CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_4_3C does not exist in Kconfig; resolving it from BOARD_DIR='waveshare/esp32-s3-touch-lcd-4.3c' instead.
+ok
+test_default_flash_options_are_not_repeated (test_build.VersionTests) ... ok
+test_language_and_wake_word_are_not_board_config_options (test_build.VersionTests) ... ok
+test_parse_and_match (test_build.VersionTests) ... ok
+test_reported_types_and_names_are_valid_and_unique (test_build.VersionTests) ... ok
+test_zip_is_always_recreated (test_build.ZipTests) ... ok
+test_text_font_metadata_uses_bundle_charset_size_and_bpp (test_build_default_assets.BuildDefaultAssetsTest) ... ok
+test_text_font_requires_bundle (test_build_default_assets.BuildDefaultAssetsTest) ... ok
+
+======================================================================
+FAIL: test_relative_board_includes_exist (test_build.BoardSourceTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/bbg/code/LeeDebug/xiaozhi-esp32-lee/scripts/tests/test_build.py", line 1385, in test_relative_board_includes_exist
+    self.assertEqual(missing, [])
+AssertionError: Lists differ: ['main/boards/waveshare/esp32-p4-nano/assets/logo__qingdao_tsg.c:5: ../lvgl.h'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'main/boards/waveshare/esp32-p4-nano/assets/logo__qingdao_tsg.c:5: ../lvgl.h'
+
+- ['main/boards/waveshare/esp32-p4-nano/assets/logo__qingdao_tsg.c:5: ../lvgl.h']
++ []
+
+----------------------------------------------------------------------
+Ran 62 tests in 1.548s
+
+FAILED (failures=1)
+[INFO] Switching target from esp32c3 to esp32s3.
+[INFO] Reusing target esp32s3.
+[INFO] Updated /var/folders/ps/1pn6g_wn4kz8qd1grpdkb2wh0000gn/T/tmpyqus4oga/settings.json IDF_TARGET to esp32s3.
+Available variants for test-board:
+  1. variant-a
+  2. variant-b
+Available variants for test-board:
+  1. variant-a
+  2. variant-b
+zip bin to releases/v1.2.3_test-board.zip done
+Generated: /var/folders/ps/1pn6g_wn4kz8qd1grpdkb2wh0000gn/T/tmpp0_o4sia/index.json

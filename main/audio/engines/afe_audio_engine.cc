@@ -132,7 +132,7 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
         return false;
     }
 
-    afe_config->aec_init = codec_->input_reference();
+    afe_config->aec_init = codec_->input_reference() && !codec_->HasHardwareAec();
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
     afe_config->aec_nlp_level = AEC_NLP_LEVEL_VERYAGGR;
     afe_config->ns_init = false;
@@ -165,7 +165,7 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
     if (wake_detector_ == WakeDetector::kWakeNet) {
         afe_iface_->disable_wakenet(afe_data_);
     }
-    if (codec_->input_reference()) {
+    if (codec_->input_reference() && !codec_->HasHardwareAec()) {
         afe_iface_->disable_aec(afe_data_);
     }
     afe_iface_->print_pipeline(afe_data_);
@@ -245,7 +245,7 @@ void AfeAudioEngine::EnableVoiceProcessing(bool enable) {
 
 void AfeAudioEngine::EnableDeviceAec(bool enable) {
     device_aec_enabled_.store(enable);
-    if (enable && (codec_ == nullptr || !codec_->input_reference())) {
+    if (enable && (codec_ == nullptr || !codec_->input_reference() || codec_->HasHardwareAec())) {
         ESP_LOGW(TAG, "Device AEC requires a playback reference channel");
     }
     UpdateAecState();
@@ -279,6 +279,10 @@ void AfeAudioEngine::OnVadStateChange(std::function<void(bool speaking)> callbac
     vad_state_change_callback_ = std::move(callback);
 }
 
+void AfeAudioEngine::OnVadFrame(std::function<void(bool, uint32_t)> callback) {
+    vad_frame_callback_ = std::move(callback);
+}
+
 void AfeAudioEngine::UpdateActiveState() {
     EventBits_t bits = xEventGroupGetBits(event_group_);
     const bool afe_active = afe_data_ != nullptr &&
@@ -308,7 +312,8 @@ void AfeAudioEngine::UpdateActiveState() {
 }
 
 void AfeAudioEngine::UpdateAecState() {
-    if (afe_data_ == nullptr || codec_ == nullptr || !codec_->input_reference()) {
+    if (afe_data_ == nullptr || codec_ == nullptr || !codec_->input_reference() ||
+        codec_->HasHardwareAec()) {
         return;
     }
     afe_control_dirty_ = true;
@@ -323,7 +328,7 @@ void AfeAudioEngine::ApplyAfeControls() {
             afe_iface_->disable_wakenet(afe_data_);
         }
     }
-    if (codec_->input_reference()) {
+    if (codec_->input_reference() && !codec_->HasHardwareAec()) {
         const bool enable_aec = (bits & kWakeWordEnabled) ||
             (device_aec_enabled_.load() && (bits & kVoiceProcessingEnabled));
         if (enable_aec) {
@@ -414,6 +419,10 @@ void AfeAudioEngine::HandleWakeWordResult(const afe_fetch_result_t* result) {
 }
 
 void AfeAudioEngine::HandleVoiceResult(const afe_fetch_result_t* result) {
+    if (vad_frame_callback_) {
+        vad_frame_callback_(result->vad_state == VAD_SPEECH,
+                            result->data_size / sizeof(int16_t) * 1000 / 16000);
+    }
     if (output_reset_pending_.exchange(false)) {
         output_buffer_.clear();
     }

@@ -33,7 +33,7 @@
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 #define MAIN_EVENT_PLAYBACK_DRAINED     (1 << 13)
-
+#define MAIN_EVENT_TTS_DRAIN_CHECK (1 << 14)
 
 enum AecMode {
     kAecOff,
@@ -131,6 +131,7 @@ private:
     std::deque<std::function<void()>> main_tasks_;
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
+    esp_timer_handle_t tts_drain_timer_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
@@ -142,7 +143,16 @@ private:
     std::function<void(const std::string&)> mcp_broadcast_callback_;
 
     bool has_server_time_ = false;
-    bool aborted_ = false;
+    std::atomic<bool> aborted_{false};
+    // Receive-side admission metadata, separate from main-task device state.
+    std::mutex tts_admission_mutex_;
+    std::atomic<bool> accepting_tts_audio_{false};
+    std::atomic<uint32_t> incoming_tts_generation_{0};
+    std::atomic<uint32_t> incoming_tts_epoch_{0};
+    bool pending_tts_stop_ = false;
+    uint32_t pending_tts_stop_epoch_ = 0;
+    int64_t tts_stop_time_us_ = 0;
+    int64_t last_tts_audio_time_us_ = 0;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     bool pending_listening_start_ = false;  // Waiting for playback to drain before starting listening (auto mode)
@@ -164,6 +174,10 @@ private:
     void ContinueWakeWordInvoke(const std::string& wake_word);
     void StartListeningAudio();
     void ConfigureWakeWordForListening();
+    void HandleVoiceInterruption(uint32_t generation);
+    void FinishTtsPlayback();
+    void CheckTtsPlaybackStopped();
+    void CancelTtsPlayback();
 
     // Activation task (runs in background)
     void ActivationTask();

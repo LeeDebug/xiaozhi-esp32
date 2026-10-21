@@ -42,6 +42,8 @@ public:
     void OnOutput(std::function<void(std::vector<int16_t>&& data)> callback) override;
     void OnVadStateChange(std::function<void(bool speaking)> callback) override;
 
+    void OnVadFrame(std::function<void(bool, uint32_t)> callback) override;
+
     void EncodeWakeWordData() override;
     bool GetWakeWordOpus(std::vector<uint8_t>& opus) override;
     const std::string& GetLastDetectedWakeWord() const override { return last_detected_wake_word_; }
@@ -88,6 +90,7 @@ private:
     std::function<void(const std::string&)> wake_word_detected_callback_;
     std::function<void(std::vector<int16_t>&&)> output_callback_;
     std::function<void(bool)> vad_state_change_callback_;
+    std::function<void(bool, uint32_t)> vad_frame_callback_;
 
     TaskHandle_t wake_word_encode_task_ = nullptr;
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;

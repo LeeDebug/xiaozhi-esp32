@@ -99,6 +99,13 @@ void AudioService::Initialize(AudioCodec* codec) {
             callbacks_.on_vad_change(speaking);
         }
     });
+    audio_engine_->OnVadFrame(
+        [this](bool speech, uint32_t frame_ms) { HandleVadFrame(speech, frame_ms); });
+    interruption_config_ = codec_->GetVoiceInterruptionConfig();
+    if (interruption_config_.enabled && !SupportsVoiceInterruption()) {
+        ESP_LOGW(TAG, "Voice interruption requires hardware AEC and CONFIG_USE_AUDIO_PROCESSOR");
+    }
+
     audio_engine_->OnWakeWordDetected([this](const std::string& wake_word) {
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
         if (callbacks_.on_wake_word_detected) {
@@ -175,6 +182,8 @@ void AudioService::Stop() {
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
         ++playback_generation_;
+        voice_interruption_.Disarm();
+        codec_->CancelOutput(playback_generation_);
         audio_encode_queue_.clear();
         audio_decode_queue_.clear();
         audio_playback_queue_.clear();
@@ -324,6 +333,9 @@ void AudioService::AudioOutputTask() {
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
         output_in_flight_ = true;
+        const uint32_t generation = task->playback_generation;
+        codec_->ResumeOutput(generation);
+        voice_interruption_.PlaybackStarted(esp_timer_get_time());
         audio_queue_cv_.notify_all();
         lock.unlock();
 
@@ -333,7 +345,7 @@ void AudioService::AudioOutputTask() {
             codec_->EnableOutput(true);
         }
 
-        codec_->OutputData(task->pcm);
+        codec_->OutputData(task->pcm, generation);
 
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
@@ -343,7 +355,7 @@ void AudioService::AudioOutputTask() {
         lock.lock();
 #if CONFIG_USE_SERVER_AEC
         /* Record the timestamp for server AEC */
-        if (task->timestamp > 0) {
+        if (task->timestamp > 0 && generation == playback_generation_) {
             timestamp_queue_.push_back(task->timestamp);
         }
 #endif
@@ -384,6 +396,7 @@ void AudioService::OpusCodecTask() {
             auto task = std::make_unique<AudioTask>();
             task->type = kAudioTaskTypeDecodeToPlaybackQueue;
             task->timestamp = packet->timestamp;
+            task->playback_generation = generation;
 
             SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
             bool decoded = false;
@@ -402,6 +415,16 @@ void AudioService::OpusCodecTask() {
                 };
                 esp_audio_dec_info_t dec_info = {};
                 std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
+                if (decoder_generation_ != generation) {
+                    // An old, already dequeued packet can finish after ResetDecoder.
+                    // Reset again in the codec task before decoding the new turn,
+                    // including resampler history, so it cannot color the new audio.
+                    esp_opus_dec_reset(opus_decoder_);
+                    if (output_resampler_ != nullptr) {
+                        esp_ae_rate_cvt_reset(output_resampler_);
+                    }
+                    decoder_generation_ = generation;
+                }
                 auto ret = esp_opus_dec_decode(opus_decoder_, &raw, &out_frame, &dec_info);
                 decoder_lock.unlock();
                 if (ret == ESP_AUDIO_ERR_OK) {
@@ -651,14 +674,16 @@ void AudioService::EnableWakeWordDetection(bool enable) {
     }
 }
 
-void AudioService::EnableVoiceProcessing(bool enable) {
+void AudioService::EnableVoiceProcessing(bool enable, bool reset_playback) {
     ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
 
     if (enable) {
         if (!InitializeAudioEngine()) {
             return;
         }
-        ResetDecoder();
+        if (reset_playback) {
+            ResetDecoder();
+        }
         audio_input_need_warmup_ = true;
         {
             std::lock_guard<std::mutex> lock(input_resampler_mutex_);
@@ -669,6 +694,8 @@ void AudioService::EnableVoiceProcessing(bool enable) {
         audio_engine_->EnableVoiceProcessing(true);
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
     } else {
+        DisarmVoiceInterruption();
+        voice_detected_ = false;
         if (audio_engine_initialized_) {
             audio_engine_->EnableVoiceProcessing(false);
         }
@@ -694,10 +721,10 @@ void AudioService::EnableAudioTesting(bool enable) {
 
 void AudioService::EnableDeviceAec(bool enable) {
     ESP_LOGI(TAG, "%s device AEC", enable ? "Enabling" : "Disabling");
-    device_aec_enabled_ = enable;
+    device_aec_enabled_ = enable && !codec_->HasHardwareAec();
 
     if (audio_engine_initialized_) {
-        audio_engine_->EnableDeviceAec(enable);
+        audio_engine_->EnableDeviceAec(device_aec_enabled_ && !codec_->HasHardwareAec());
     } else {
         ESP_LOGI(TAG, "Deferring AEC change until the audio engine is initialized");
     }
@@ -745,6 +772,8 @@ void AudioService::ResetDecoder() {
     {
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
         ++playback_generation_;
+        voice_interruption_.Disarm();
+        codec_->CancelOutput(playback_generation_);
         std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
         if (opus_decoder_ != nullptr) {
             esp_opus_dec_reset(opus_decoder_);
@@ -759,6 +788,77 @@ void AudioService::ResetDecoder() {
     }
     if (notify_drained && callbacks_.on_playback_drained) {
         callbacks_.on_playback_drained();
+    }
+}
+
+bool AudioService::SupportsVoiceInterruption() const {
+#if CONFIG_USE_AUDIO_PROCESSOR && \
+    (CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31)
+    return codec_ && codec_->HasHardwareAec() && interruption_config_.enabled;
+#else
+    return false;
+#endif
+}
+
+void AudioService::ArmVoiceInterruption() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    if (SupportsVoiceInterruption() && IsAudioProcessorRunning()) {
+        voice_interruption_.Arm();
+        if (output_in_flight_) {
+            voice_interruption_.PlaybackStarted(esp_timer_get_time());
+        }
+    }
+}
+
+void AudioService::DisarmVoiceInterruption() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    voice_interruption_.Disarm();
+}
+
+bool AudioService::IsVoiceInterruptionPending(uint32_t generation) {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return generation == playback_generation_ && voice_interruption_.pending() &&
+           IsAudioProcessorRunning() && !service_stopped_.load();
+}
+
+uint32_t AudioService::GetPlaybackGeneration() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return playback_generation_;
+}
+
+bool AudioService::PushTtsPacket(std::unique_ptr<AudioStreamPacket> packet, uint32_t generation) {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    if (generation != playback_generation_ || service_stopped_.load() ||
+        audio_decode_queue_.size() >= MAX_DECODE_PACKETS_IN_QUEUE) {
+        return false;
+    }
+    playback_drained_notified_ = false;
+    audio_decode_queue_.push_back(std::move(packet));
+    audio_queue_cv_.notify_all();
+    return true;
+}
+
+void AudioService::HandleVadFrame(bool speech, uint32_t frame_ms) {
+    uint32_t generation = 0;
+    bool notify = false;
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        if (!SupportsVoiceInterruption() || !IsAudioProcessorRunning()) {
+            return;
+        }
+        if (IsPlaybackDrainedLocked()) {
+            voice_interruption_.Observe(false, frame_ms, esp_timer_get_time(),
+                                        interruption_config_.playback_guard_ms,
+                                        interruption_config_.min_speech_ms);
+            return;
+        }
+        notify = voice_interruption_.Observe(speech, frame_ms, esp_timer_get_time(),
+                                             interruption_config_.playback_guard_ms,
+                                             interruption_config_.min_speech_ms);
+        generation = playback_generation_;
+    }
+    if (notify && callbacks_.on_voice_interruption) {
+        callbacks_.on_voice_interruption(generation);
     }
 }
 
@@ -819,6 +919,6 @@ bool AudioService::InitializeAudioEngine() {
         return false;
     }
     audio_engine_initialized_ = true;
-    audio_engine_->EnableDeviceAec(device_aec_enabled_);
+    audio_engine_->EnableDeviceAec(device_aec_enabled_ && !codec_->HasHardwareAec());
     return true;
 }

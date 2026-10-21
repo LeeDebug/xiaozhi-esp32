@@ -6,9 +6,10 @@
 #include <driver/i2s_std.h>
 #include <esp_idf_version.h>
 
-#include <vector>
-#include <string>
+#include <cstdint>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include "board.h"
 
@@ -24,6 +25,13 @@
 #define XIAOZHI_I2S_PORT(port) static_cast<i2s_port_t>(port)
 #endif
 
+struct VoiceInterruptionConfig {
+    bool enabled = false;
+    uint32_t min_speech_ms = 200;
+    uint32_t playback_guard_ms = 300;
+    uint32_t playback_drain_ms = 180;
+};
+
 class AudioCodec {
 public:
     AudioCodec();
@@ -35,6 +43,13 @@ public:
     virtual void EnableOutput(bool enable);
 
     virtual void OutputData(std::vector<int16_t>& data);
+    // The generation overload prevents a dequeued old frame from starting after
+    // cancellation. Codecs with cancellable hardware output override all three.
+    virtual void OutputData(std::vector<int16_t>& data, uint32_t) { OutputData(data); }
+    virtual void CancelOutput(uint32_t) {}
+    virtual void ResumeOutput(uint32_t) {}
+    virtual bool HasHardwareAec() const { return false; }
+    virtual VoiceInterruptionConfig GetVoiceInterruptionConfig() const { return {}; }
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
 

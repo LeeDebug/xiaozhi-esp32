@@ -6,6 +6,7 @@
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
 
+#include <atomic>
 #include <mutex>
 
 // AP-0316 mode 6 supplies its own I2S clocks. The ES8311 DAC uses a separate
@@ -20,12 +21,21 @@ public:
     void SetOutputVolume(int volume) override;
     bool InputData(std::vector<int16_t>& data) override;
     void OutputData(std::vector<int16_t>& data) override;
+    void OutputData(std::vector<int16_t>& data, uint32_t generation) override;
+    bool HasHardwareAec() const override;
+    VoiceInterruptionConfig GetVoiceInterruptionConfig() const override;
+    void CancelOutput(uint32_t generation) override;
+    void ResumeOutput(uint32_t generation) override;
 
 protected:
     int Read(int16_t* dest, int samples) override;
     int Write(const int16_t* data, int samples) override;
 
 private:
+    int WriteGeneration(const int16_t* data, int samples, uint32_t generation);
+    std::atomic<uint32_t> output_generation_{0};
+    std::atomic<bool> output_cancelled_{false};
+    std::atomic<bool> output_flush_pending_{false};
     void CreateChannels();
 
     const audio_codec_data_if_t* data_if_ = nullptr;

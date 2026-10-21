@@ -18,8 +18,10 @@ namespace {
 constexpr char kTag[] = "WaveshareUac";
 constexpr uint32_t kSampleRate = 48000;
 constexpr int kFramesPerChunk = 480;
-constexpr uint32_t kIoTimeoutMs = 100;
-constexpr uint32_t kStreamBufferBytes = 16384;
+constexpr uint32_t kIoTimeoutMs = 20;
+constexpr uint32_t kResumeTimeoutMs = 1500;
+constexpr uint32_t kInputBufferBytes = 16384;
+constexpr uint32_t kOutputBufferBytes = 3840;  // 40 ms stereo / 80 ms mono PCM.
 
 void DescriptorClientCallback(const usb_host_client_event_msg_t*, void*) {}
 
@@ -198,27 +200,31 @@ void UsbUacAudioCodec::DeviceCallback(uac_host_device_handle_t handle,
 void UsbUacAudioCodec::ControlTask(void* arg) {
     auto* self = static_cast<UsbUacAudioCodec*>(arg);
     Event item;
-    while (xQueueReceive(self->events_, &item, portMAX_DELAY) == pdTRUE) {
-        switch (item.type) {
-            case EventType::ConnectInput:
-                self->OpenStream(true, item.addr, item.iface_num);
-                break;
-            case EventType::ConnectOutput:
-                self->OpenStream(false, item.addr, item.iface_num);
-                break;
-            case EventType::Disconnect:
-                self->CloseStream(item.handle);
-                break;
-            case EventType::UpdateStreams: {
-                std::lock_guard<std::mutex> lock(self->mutex_);
-                self->UpdateStreams();
-            } break;
+    while (true) {
+        if (xQueueReceive(self->events_, &item, pdMS_TO_TICKS(10)) == pdTRUE) {
+            switch (item.type) {
+                case EventType::ConnectInput:
+                    self->OpenStream(true, item.addr, item.iface_num);
+                    break;
+                case EventType::ConnectOutput:
+                    self->OpenStream(false, item.addr, item.iface_num);
+                    break;
+                case EventType::Disconnect:
+                    self->CloseStream(item.handle);
+                    break;
+                case EventType::UpdateStreams:
+                    break;
+            }
         }
+        // Polling also covers coalesced/full update events. Control work never
+        // runs in the application task or concurrently with a direction's I/O.
+        self->UpdateStreams();
     }
 }
 
 void UsbUacAudioCodec::OpenStream(bool input, uint8_t addr, uint8_t iface_num) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> io_lock(input ? input_io_mutex_ : output_io_mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     Stream& stream = input ? input_ : output_;
     if (stream.handle != nullptr) {
         stream.pending_addr = addr;
@@ -227,6 +233,7 @@ void UsbUacAudioCodec::OpenStream(bool input, uint8_t addr, uint8_t iface_num) {
         return;
     }
 
+    lock.unlock();
     // usb_host_uac 1.x rejects UAC 2.0 and its error path dereferences a null
     // interface. Inspect the cached descriptor before entering that path.
     if (!IsUac1Device(addr)) {
@@ -236,7 +243,7 @@ void UsbUacAudioCodec::OpenStream(bool input, uint8_t addr, uint8_t iface_num) {
     const uac_host_device_config_t device_config = {
         .addr = addr,
         .iface_num = iface_num,
-        .buffer_size = kStreamBufferBytes,
+        .buffer_size = input ? kInputBufferBytes : kOutputBufferBytes,
         .buffer_threshold = kFramesPerChunk * sizeof(int16_t),
         .callback = DeviceCallback,
         .callback_arg = this,
@@ -315,14 +322,17 @@ void UsbUacAudioCodec::OpenStream(bool input, uint8_t addr, uint8_t iface_num) {
         uac_host_device_close(handle);
         return;
     }
+    lock.lock();
     stream.handle = handle;
     stream.channels = channels;
     ESP_LOGI(kTag, "UAC %s connected: %u channel(s), 48 kHz/16-bit", input ? "mic" : "speaker",
              channels);
-    UpdateStreams();
+    stream_cv_.notify_all();
 }
 
 void UsbUacAudioCodec::CloseStream(uac_host_device_handle_t handle) {
+    std::unique_lock<std::mutex> input_lock(input_io_mutex_);
+    std::unique_lock<std::mutex> output_lock(output_io_mutex_);
     std::unique_lock<std::mutex> lock(mutex_);
     Stream* stream = input_.handle == handle    ? &input_
                      : output_.handle == handle ? &output_
@@ -339,31 +349,65 @@ void UsbUacAudioCodec::CloseStream(uac_host_device_handle_t handle) {
     stream->pending = false;
     stream->running = false;
     stream_cv_.notify_all();
+    lock.unlock();
     uac_host_device_close(handle);
     ESP_LOGI(kTag, "UAC interface disconnected");
-    lock.unlock();
+    output_lock.unlock();
+    input_lock.unlock();
     if (pending) {
         OpenStream(input, pending_addr, pending_iface_num);
     }
 }
 
 void UsbUacAudioCodec::UpdateStreams() {
-    // The caller holds mutex_ while a stream is resumed, suspended or closed.
-    auto update = [](Stream& stream, bool enable) {
-        if (stream.handle == nullptr || stream.running == enable) {
-            return;
+    // Each direction owns its handle throughout its I/O/control operation.
+    // Do not keep the global state lock, or the microphone lock, during the
+    // speaker's USB control request (which may wait for the peripheral).
+    auto update = [this](Stream& stream, bool input) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const bool desired =
+                input ? input_enabled_
+                      : output_enabled_ && !output_cancelled_ && !output_flush_pending_;
+            if (stream.running == desired && (input || !output_flush_pending_))
+                return;
         }
-        esp_err_t err =
-            enable ? uac_host_device_resume(stream.handle) : uac_host_device_suspend(stream.handle);
-        if (err == ESP_OK) {
-            stream.running = enable;
-        } else {
-            ESP_LOGW(kTag, "UAC stream %s failed: %s", enable ? "resume" : "suspend",
-                     esp_err_to_name(err));
+        std::lock_guard<std::mutex> io_lock(input ? input_io_mutex_ : output_io_mutex_);
+        uac_host_device_handle_t handle;
+        bool running;
+        bool enable;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            handle = stream.handle;
+            running = stream.running;
+            enable = input ? input_enabled_ : output_enabled_;
+        }
+        if (!input && output_flush_pending_) {
+            // Suspend halts/flushed USB transfers and flushes the ringbuffer.
+            if (handle == nullptr || !running || uac_host_device_suspend(handle) == ESP_OK) {
+                running = false;
+                output_flush_pending_ = false;
+            }
+        }
+        if (!input)
+            enable = enable && !output_cancelled_ && !output_flush_pending_;
+        if (handle != nullptr && running != enable) {
+            const esp_err_t err =
+                enable ? uac_host_device_resume(handle) : uac_host_device_suspend(handle);
+            if (err == ESP_OK) {
+                running = enable;
+            } else {
+                ESP_LOGW(kTag, "UAC stream %s failed: %s", enable ? "resume" : "suspend",
+                         esp_err_to_name(err));
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stream.running = running;
         }
     };
-    update(input_, input_enabled_);
-    update(output_, output_enabled_);
+    update(input_, true);
+    update(output_, false);
     stream_cv_.notify_all();
 }
 
@@ -398,37 +442,40 @@ void UsbUacAudioCodec::SetOutputVolume(int volume) {
 }
 
 int UsbUacAudioCodec::Read(int16_t* dest, int samples) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!input_.running || input_.handle == nullptr) {
-        return 0;
+    std::lock_guard<std::mutex> io_lock(input_io_mutex_);
+    uac_host_device_handle_t handle;
+    uint8_t channels;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!input_.running || input_.handle == nullptr)
+            return 0;
+        handle = input_.handle;
+        channels = input_.channels;
     }
     int completed = 0;
     while (completed < samples) {
         const int frames = std::min(samples - completed, kFramesPerChunk);
-        uint8_t* target = input_.channels == 1 ? reinterpret_cast<uint8_t*>(dest + completed)
-                                               : reinterpret_cast<uint8_t*>(pcm_buffer_.data());
-        const uint32_t bytes_needed = frames * input_.channels * sizeof(int16_t);
+        uint8_t* target = channels == 1 ? reinterpret_cast<uint8_t*>(dest + completed)
+                                        : reinterpret_cast<uint8_t*>(input_buffer_.data());
+        const uint32_t bytes_needed = frames * channels * sizeof(int16_t);
         uint32_t received = 0;
         const TickType_t begin = xTaskGetTickCount();
         const TickType_t timeout = pdMS_TO_TICKS(kIoTimeoutMs);
         while (received < bytes_needed) {
             const TickType_t elapsed = xTaskGetTickCount() - begin;
-            if (elapsed >= timeout) {
+            if (elapsed >= timeout)
                 return 0;
-            }
             uint32_t bytes_read = 0;
-            esp_err_t err =
-                uac_host_device_read(input_.handle, target + received, bytes_needed - received,
-                                     &bytes_read, timeout - elapsed);
-            if (err != ESP_OK || bytes_read == 0 || bytes_read > bytes_needed - received) {
+            esp_err_t err = uac_host_device_read(handle, target + received, bytes_needed - received,
+                                                 &bytes_read, timeout - elapsed);
+            if (err != ESP_OK || bytes_read == 0 || bytes_read > bytes_needed - received)
                 return 0;
-            }
             received += bytes_read;
         }
-        if (input_.channels == 2) {
+        if (channels == 2) {
             for (int i = 0; i < frames; ++i) {
-                dest[completed + i] = (static_cast<int32_t>(pcm_buffer_[2 * i]) +
-                                       static_cast<int32_t>(pcm_buffer_[2 * i + 1])) /
+                dest[completed + i] = (static_cast<int32_t>(input_buffer_[2 * i]) +
+                                       static_cast<int32_t>(input_buffer_[2 * i + 1])) /
                                       2;
             }
         }
@@ -438,44 +485,83 @@ int UsbUacAudioCodec::Read(int16_t* dest, int samples) {
 }
 
 int UsbUacAudioCodec::Write(const int16_t* data, int samples) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (!output_enabled_ || output_.handle == nullptr) {
-        return 0;
+    return WriteGeneration(data, samples, output_generation_);
+}
+
+int UsbUacAudioCodec::WriteGeneration(const int16_t* data, int samples, uint32_t generation) {
+    auto cancelled = [this, generation]() {
+        return output_cancelled_ || output_generation_ != generation;
+    };
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!output_enabled_ || output_.handle == nullptr || cancelled())
+            return 0;
+        // Do not hold the output I/O lock while waiting: the control task needs
+        // it to flush the cancelled generation and resume the next one.
+        if (!stream_cv_.wait_for(lock, std::chrono::milliseconds(kResumeTimeoutMs), [&]() {
+                return (output_.running && !output_flush_pending_) || cancelled() ||
+                       !output_enabled_ || output_.handle == nullptr;
+            }))
+            return 0;
     }
-    // EnableOutput schedules USB control work. Let that task resume the stream
-    // before consuming the first playback buffer, including after idle suspend.
-    // Waiting releases mutex_ so the control task can make progress.
-    if (!stream_cv_.wait_for(lock, std::chrono::milliseconds(kIoTimeoutMs), [this]() {
-            return output_.running || !output_enabled_ || output_.handle == nullptr;
-        })) {
-        ESP_LOGW(kTag, "UAC speaker resume timed out before playback");
-        return 0;
+    std::lock_guard<std::mutex> io_lock(output_io_mutex_);
+    uac_host_device_handle_t handle;
+    uint8_t channels;
+    int volume;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!output_enabled_ || !output_.running || output_.handle == nullptr ||
+            output_flush_pending_ || cancelled())
+            return 0;
+        handle = output_.handle;
+        channels = output_.channels;
+        volume = std::clamp(output_volume_, 0, 100);
     }
-    if (!output_enabled_ || !output_.running || output_.handle == nullptr) {
-        return 0;
-    }
-    const int volume = std::clamp(output_volume_, 0, 100);
     const int gain = volume * volume;
     int completed = 0;
-    while (completed < samples) {
+    while (completed < samples && !cancelled()) {
         const int frames = std::min(samples - completed, kFramesPerChunk);
         for (int i = 0; i < frames; ++i) {
             const int16_t sample = static_cast<int32_t>(data[completed + i]) * gain / 10000;
-            pcm_buffer_[i * output_.channels] = sample;
-            if (output_.channels == 2) {
-                pcm_buffer_[i * 2 + 1] = sample;
-            }
+            output_buffer_[i * channels] = sample;
+            if (channels == 2)
+                output_buffer_[i * 2 + 1] = sample;
         }
-        esp_err_t err = uac_host_device_write(
-            output_.handle, reinterpret_cast<uint8_t*>(pcm_buffer_.data()),
-            frames * output_.channels * sizeof(int16_t), pdMS_TO_TICKS(kIoTimeoutMs));
-        if (err != ESP_OK) {
-            ESP_LOGW(kTag, "UAC speaker write failed: %s", esp_err_to_name(err));
+        esp_err_t err =
+            uac_host_device_write(handle, reinterpret_cast<uint8_t*>(output_buffer_.data()),
+                                  frames * channels * sizeof(int16_t), pdMS_TO_TICKS(kIoTimeoutMs));
+        if (err != ESP_OK)
             return completed;
-        }
         completed += frames;
     }
     return completed;
+}
+
+bool UsbUacAudioCodec::HasHardwareAec() const { return USB_UAC_HAS_HARDWARE_AEC; }
+
+VoiceInterruptionConfig UsbUacAudioCodec::GetVoiceInterruptionConfig() const {
+    return {USB_UAC_HAS_HARDWARE_AEC && AUDIO_VOICE_INTERRUPTION_ENABLED,
+            AUDIO_VOICE_INTERRUPTION_MIN_SPEECH_MS, AUDIO_VOICE_INTERRUPTION_PLAYBACK_GUARD_MS,
+            AUDIO_VOICE_INTERRUPTION_PLAYBACK_DRAIN_MS};
+}
+
+void UsbUacAudioCodec::CancelOutput(uint32_t generation) {
+    output_cancelled_ = true;
+    output_generation_ = generation;
+    output_flush_pending_ = true;
+    stream_cv_.notify_all();
+    QueueUpdate();
+}
+
+void UsbUacAudioCodec::ResumeOutput(uint32_t generation) {
+    if (generation != output_generation_)
+        return;
+    output_cancelled_ = false;
+    QueueUpdate();
+}
+
+void UsbUacAudioCodec::OutputData(std::vector<int16_t>& data, uint32_t generation) {
+    WriteGeneration(data.data(), data.size(), generation);
 }
 
 bool UsbUacAudioCodec::InputData(std::vector<int16_t>& data) {

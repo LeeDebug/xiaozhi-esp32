@@ -15,6 +15,7 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include <cJSON.h>
+#include <algorithm>
 #include <cstring>
 
 #define TAG "Application"
@@ -46,6 +47,10 @@ Application::Application() {
 }
 
 Application::~Application() {
+    if (tts_drain_timer_ != nullptr) {
+        esp_timer_stop(tts_drain_timer_);
+        esp_timer_delete(tts_drain_timer_);
+    }
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
@@ -69,6 +74,18 @@ void Application::Initialize() {
     auto codec = board.GetAudioCodec();
     audio_service_.Initialize(codec);
     audio_service_.Start();
+    if (audio_service_.SupportsVoiceInterruption()) {
+        esp_timer_create_args_t args = {};
+        args.callback = [](void* arg) {
+            auto* app = static_cast<Application*>(arg);
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_TTS_DRAIN_CHECK);
+        };
+        args.arg = this;
+        args.dispatch_method = ESP_TIMER_TASK;
+        args.name = "tts_drain";
+        args.skip_unhandled_events = true;
+        ESP_ERROR_CHECK(esp_timer_create(&args, &tts_drain_timer_));
+    }
 
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
@@ -82,6 +99,9 @@ void Application::Initialize() {
     };
     callbacks.on_playback_drained = [this]() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_PLAYBACK_DRAINED);
+    };
+    callbacks.on_voice_interruption = [this](uint32_t generation) {
+        Schedule([this, generation]() { HandleVoiceInterruption(generation); });
     };
     audio_service_.SetCallbacks(callbacks);
 
@@ -174,12 +194,13 @@ void Application::Run() {
         MAIN_EVENT_VAD_CHANGE | MAIN_EVENT_CLOCK_TICK | MAIN_EVENT_ERROR |
         MAIN_EVENT_NETWORK_CONNECTED | MAIN_EVENT_NETWORK_DISCONNECTED | MAIN_EVENT_TOGGLE_CHAT |
         MAIN_EVENT_START_LISTENING | MAIN_EVENT_STOP_LISTENING | MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED;
+        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED | MAIN_EVENT_TTS_DRAIN_CHECK;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+            CancelTtsPlayback();
             SetDeviceState(kDeviceStateIdle);
             Alert(Lang::Strings::ERROR, last_error_message_.c_str(), "cancel",
                   Lang::Sounds::OGG_EXCLAMATION);
@@ -202,6 +223,10 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_PLAYBACK_DRAINED) {
+            {
+                std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+                CheckTtsPlaybackStopped();
+            }
             // Deferred listening start (auto mode): the playback queue has
             // drained, so it is now safe to enable voice processing.
             if (pending_listening_start_ && GetDeviceState() == kDeviceStateListening &&
@@ -209,6 +234,11 @@ void Application::Run() {
                 pending_listening_start_ = false;
                 StartListeningAudio();
             }
+        }
+
+        if (bits & MAIN_EVENT_TTS_DRAIN_CHECK) {
+            std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+            CheckTtsPlaybackStopped();
         }
 
         if (bits & MAIN_EVENT_TOGGLE_CHAT) {
@@ -300,6 +330,7 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+    CancelTtsPlayback();
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateConnecting || state == kDeviceStateListening ||
@@ -516,7 +547,15 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
+        if (audio_service_.SupportsVoiceInterruption()) {
+            std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+            const uint32_t generation = incoming_tts_generation_.load();
+            if (accepting_tts_audio_.load()) {
+                if (audio_service_.PushTtsPacket(std::move(packet), generation)) {
+                    last_tts_audio_time_us_ = esp_timer_get_time();
+                }
+            }
+        } else if (GetDeviceState() == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
@@ -532,11 +571,21 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnAudioChannelClosed([this, &board]() {
+        {
+            std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+            accepting_tts_audio_ = false;
+            incoming_tts_epoch_.fetch_add(1);
+            if (audio_service_.SupportsVoiceInterruption()) {
+                audio_service_.ResetDecoder();
+            }
+        }
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
-            SetDeviceState(kDeviceStateIdle);
+            if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+                SetDeviceState(kDeviceStateIdle);
+            }
         });
     });
 
@@ -553,18 +602,70 @@ void Application::InitializeProtocol() {
                 return;
             }
             if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this]() {
+                uint32_t epoch;
+                {
+                    std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+                    if (audio_service_.SupportsVoiceInterruption() &&
+                        !state_machine_.CanTransitionTo(kDeviceStateSpeaking)) {
+                        ESP_LOGW(TAG, "Ignoring TTS start in state %d", GetDeviceState());
+                        return;
+                    }
+                    epoch = incoming_tts_epoch_.fetch_add(1) + 1;
+                    if (audio_service_.SupportsVoiceInterruption()) {
+                        // Open admission before the main-task state update so the
+                        // first binary packet is not lost. Reset precedes admission,
+                        // and each packet carries this output generation.
+                        accepting_tts_audio_ = false;
+                        audio_service_.ResetDecoder();
+                        incoming_tts_generation_ = audio_service_.GetPlaybackGeneration();
+                        last_tts_audio_time_us_ = esp_timer_get_time();
+                        accepting_tts_audio_ = true;
+                    }
+                }
+                Schedule([this, epoch]() {
+                    std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+                    if (epoch != incoming_tts_epoch_.load() || !protocol_ ||
+                        !protocol_->IsAudioChannelOpened()) {
+                        return;
+                    }
+                    pending_tts_stop_ = false;
                     aborted_ = false;
-                    SetDeviceState(kDeviceStateSpeaking);
+                    if (audio_service_.SupportsVoiceInterruption() &&
+                        listening_mode_ != kListeningModeManualStop) {
+                        listening_mode_ = kListeningModeRealtime;
+                    }
+                    const bool already_speaking = GetDeviceState() == kDeviceStateSpeaking;
+                    if (!SetDeviceState(kDeviceStateSpeaking)) {
+                        if (audio_service_.SupportsVoiceInterruption()) {
+                            accepting_tts_audio_ = false;
+                            incoming_tts_epoch_.fetch_add(1);
+                            audio_service_.ResetDecoder();
+                        }
+                        return;
+                    }
+                    if (already_speaking && audio_service_.SupportsVoiceInterruption() &&
+                        listening_mode_ == kListeningModeRealtime) {
+                        audio_service_.ArmVoiceInterruption();
+                    }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
-                    if (GetDeviceState() == kDeviceStateSpeaking) {
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
+                const uint32_t epoch = incoming_tts_epoch_.load();
+                Schedule([this, epoch]() {
+                    std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+                    if (epoch != incoming_tts_epoch_.load() ||
+                        GetDeviceState() != kDeviceStateSpeaking ||
+                        (audio_service_.SupportsVoiceInterruption() && aborted_)) {
+                        return;
+                    }
+                    if (audio_service_.SupportsVoiceInterruption()) {
+                        // A finite quiet interval also admits UDP packets that
+                        // arrive just after the JSON stop marker.
+                        pending_tts_stop_ = true;
+                        pending_tts_stop_epoch_ = epoch;
+                        tts_stop_time_us_ = esp_timer_get_time();
+                        CheckTtsPlaybackStopped();
+                    } else {
+                        FinishTtsPlayback();
                     }
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
@@ -801,6 +902,7 @@ void Application::HandleStopListeningEvent() {
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     } else if (state == kDeviceStateListening) {
+        CancelTtsPlayback();
         if (protocol_) {
             protocol_->SendStopListening();
         }
@@ -909,6 +1011,10 @@ void Application::HandleStateChangedEvent() {
     // Any state change invalidates a pending deferred listening start;
     // the Listening case below re-arms it when needed.
     pending_listening_start_ = false;
+    if (new_state != kDeviceStateSpeaking) {
+        pending_tts_stop_ = false;
+        audio_service_.DisarmVoiceInterruption();
+    }
 
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
@@ -955,7 +1061,16 @@ void Application::HandleStateChangedEvent() {
                 // Only AFE wake word can be detected in speaking mode
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
-            audio_service_.ResetDecoder();
+            if (audio_service_.SupportsVoiceInterruption()) {
+                if (listening_mode_ == kListeningModeRealtime) {
+                    if (!audio_service_.IsAudioProcessorRunning()) {
+                        audio_service_.EnableVoiceProcessing(true, false);
+                    }
+                    audio_service_.ArmVoiceInterruption();
+                }
+            } else {
+                audio_service_.ResetDecoder();
+            }
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
@@ -1007,10 +1122,83 @@ void Application::Schedule(std::function<void()>&& callback) {
 
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
-    aborted_ = true;
+    {
+        std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+        aborted_ = true;
+        if (audio_service_.SupportsVoiceInterruption()) {
+            accepting_tts_audio_ = false;
+            incoming_tts_epoch_.fetch_add(1);
+            pending_tts_stop_ = false;
+            audio_service_.ResetDecoder();
+        }
+    }
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }
+    if (audio_service_.SupportsVoiceInterruption() && GetDeviceState() == kDeviceStateSpeaking) {
+        // Local cancellation also completes button/wake-word interruption; an
+        // old server stop marker is intentionally rejected by the new epoch.
+        SetDeviceState(kDeviceStateListening);
+    }
+}
+
+void Application::HandleVoiceInterruption(uint32_t generation) {
+    // This handler always runs on the main task. No input/encoder queues are
+    // reset: realtime upload already contains the beginning of the new question.
+    {
+        std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+        if (GetDeviceState() != kDeviceStateSpeaking || aborted_ ||
+            listening_mode_ != kListeningModeRealtime || !protocol_ ||
+            !protocol_->IsAudioChannelOpened() || !accepting_tts_audio_.load() ||
+            !audio_service_.IsVoiceInterruptionPending(generation)) {
+            return;
+        }
+        aborted_ = true;
+        accepting_tts_audio_ = false;
+        incoming_tts_epoch_.fetch_add(1);
+        pending_tts_stop_ = false;
+        audio_service_.ResetDecoder();
+    }
+    ESP_LOGI(TAG, "Confirmed speech during playback; interrupting reply");
+    protocol_->SendAbortSpeaking(kAbortReasonNone);
+    SetDeviceState(kDeviceStateListening);
+}
+
+void Application::CheckTtsPlaybackStopped() {
+    // Main task, with tts_admission_mutex_ held. Network callbacks only update
+    // admission metadata; the timer callback only posts an event bit.
+    if (!pending_tts_stop_ || pending_tts_stop_epoch_ != incoming_tts_epoch_.load() ||
+        GetDeviceState() != kDeviceStateSpeaking || !audio_service_.IsPlaybackIdle()) {
+        return;
+    }
+    const int64_t deadline_us = std::max(tts_stop_time_us_, last_tts_audio_time_us_) +
+                                static_cast<int64_t>(audio_service_.GetPlaybackDrainMs()) * 1000;
+    const int64_t remaining_us = deadline_us - esp_timer_get_time();
+    if (remaining_us > 0 && tts_drain_timer_ != nullptr) {
+        esp_timer_stop(tts_drain_timer_);
+        esp_timer_start_once(tts_drain_timer_, remaining_us);
+        return;
+    }
+    FinishTtsPlayback();
+}
+
+void Application::CancelTtsPlayback() {
+    if (!audio_service_.SupportsVoiceInterruption()) {
+        return;
+    }
+    std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+    accepting_tts_audio_ = false;
+    incoming_tts_epoch_.fetch_add(1);
+    pending_tts_stop_ = false;
+    audio_service_.ResetDecoder();
+}
+
+void Application::FinishTtsPlayback() {
+    pending_tts_stop_ = false;
+    accepting_tts_audio_ = false;
+    audio_service_.DisarmVoiceInterruption();
+    SetDeviceState(listening_mode_ == kListeningModeManualStop ? kDeviceStateIdle
+                                                               : kDeviceStateListening);
 }
 
 void Application::SetListeningMode(ListeningMode mode) {
@@ -1019,7 +1207,9 @@ void Application::SetListeningMode(ListeningMode mode) {
 }
 
 ListeningMode Application::GetDefaultListeningMode() const {
-    return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
+    return aec_mode_ == kAecOff && !audio_service_.SupportsVoiceInterruption()
+               ? kListeningModeAutoStop
+               : kListeningModeRealtime;
 }
 
 void Application::Reboot() {
@@ -1180,6 +1370,15 @@ void Application::PlaySound(const std::string_view& sound) { audio_service_.Play
 
 void Application::ResetProtocol() {
     Schedule([this]() {
+        {
+            std::lock_guard<std::mutex> admission_lock(tts_admission_mutex_);
+            accepting_tts_audio_ = false;
+            incoming_tts_epoch_.fetch_add(1);
+            audio_service_.DisarmVoiceInterruption();
+            if (audio_service_.SupportsVoiceInterruption()) {
+                audio_service_.ResetDecoder();
+            }
+        }
         // Close audio channel if opened
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
             protocol_->CloseAudioChannel();

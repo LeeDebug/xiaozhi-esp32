@@ -11,11 +11,14 @@
 #include <freertos/task.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 
 namespace {
 constexpr char kTag[] = "Ap0316AudioCodec";
 constexpr uint32_t kIoTimeoutMs = 100;
+constexpr uint32_t kOutputTimeoutMs = 20;
+constexpr int kOutputChunkFrames = 240;
 constexpr uint32_t kErrorLogIntervalMs = 5000;
 }  // namespace
 
@@ -166,7 +169,10 @@ void Ap0316AudioCodec::EnableOutput(bool enable) {
         ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
     }
     // Explicitly silence the board PA while output is idle, independently of RX.
-    ESP_ERROR_CHECK(gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0));
+    ESP_ERROR_CHECK(gpio_set_level(AUDIO_CODEC_PA_PIN,
+                                   enable && !output_cancelled_ && !output_flush_pending_ ? 1 : 0));
+    if (output_cancelled_ || output_flush_pending_)
+        gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
     AudioCodec::EnableOutput(enable);
 }
 
@@ -215,20 +221,102 @@ int Ap0316AudioCodec::Read(int16_t* dest, int samples) {
     return samples;
 }
 
+bool Ap0316AudioCodec::HasHardwareAec() const { return AP0316_HAS_HARDWARE_AEC; }
+
+VoiceInterruptionConfig Ap0316AudioCodec::GetVoiceInterruptionConfig() const {
+    return {AP0316_HAS_HARDWARE_AEC && AUDIO_VOICE_INTERRUPTION_ENABLED,
+            AUDIO_VOICE_INTERRUPTION_MIN_SPEECH_MS, AUDIO_VOICE_INTERRUPTION_PLAYBACK_GUARD_MS,
+            AUDIO_VOICE_INTERRUPTION_PLAYBACK_DRAIN_MS};
+}
+
+void Ap0316AudioCodec::CancelOutput(uint32_t generation) {
+    output_cancelled_ = true;
+    output_generation_ = generation;
+    output_flush_pending_ = true;
+    // GPIO mute is immediate and does not wait for an outstanding I2S write.
+    // Only TX is muted; the AP receiver and its external clocks continue.
+    gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+}
+
+void Ap0316AudioCodec::ResumeOutput(uint32_t generation) {
+    if (generation == output_generation_)
+        output_cancelled_ = false;
+}
+
+void Ap0316AudioCodec::OutputData(std::vector<int16_t>& data, uint32_t generation) {
+    WriteGeneration(data.data(), data.size(), generation);
+}
+
 int Ap0316AudioCodec::Write(const int16_t* data, int samples) {
+    return WriteGeneration(data, samples, output_generation_);
+}
+
+int Ap0316AudioCodec::WriteGeneration(const int16_t* data, int samples, uint32_t generation) {
     std::lock_guard<std::mutex> lock(output_mutex_);
-    if (!output_enabled_ || samples <= 0) {
+    auto cancelled = [this, generation]() {
+        return output_cancelled_ || output_generation_ != generation;
+    };
+    if (!output_enabled_ || samples <= 0 || cancelled())
         return 0;
+    if (output_flush_pending_.exchange(false)) {
+        // Reset TX DMA while muted, replacing every descriptor with silence.
+        // This work runs in the output task, never in CancelOutput/main task.
+        gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+        esp_err_t err = i2s_channel_disable(tx_handle_);
+        if (err == ESP_ERR_INVALID_STATE) {
+            // A previous preload may have failed while READY. A successful
+            // enable/disable cycle resets its partial DMA preload cursor.
+            err = i2s_channel_enable(tx_handle_);
+            if (err == ESP_OK)
+                err = i2s_channel_disable(tx_handle_);
+        }
+        std::array<int16_t, kOutputChunkFrames> silence{};
+        i2s_chan_info_t info = {};
+        if (err == ESP_OK)
+            err = i2s_channel_get_info(tx_handle_, &info);
+        size_t remaining = info.total_dma_buf_size;
+        while (err == ESP_OK && remaining > 0) {
+            size_t loaded = 0;
+            err = i2s_channel_preload_data(tx_handle_, silence.data(),
+                                           std::min(remaining, sizeof(silence)), &loaded);
+            if (loaded == 0) {
+                err = ESP_FAIL;
+                break;
+            }
+            remaining -= loaded;
+        }
+        if (err == ESP_OK)
+            err = i2s_channel_enable(tx_handle_);
+        if (err != ESP_OK) {
+            ESP_LOGE(kTag, "Cannot reset cancelled ES8311 output: %s", esp_err_to_name(err));
+            // Leave READY through a real enable transition so a future reset
+            // can disable again and discard any partial preload position.
+            // PA stays muted throughout this recovery, even if TX restarts.
+            const esp_err_t recovery = i2s_channel_enable(tx_handle_);
+            if (recovery != ESP_OK && recovery != ESP_ERR_INVALID_STATE) {
+                ESP_LOGW(kTag, "ES8311 TX reset recovery failed: %s", esp_err_to_name(recovery));
+            }
+            output_flush_pending_ = true;
+            return 0;
+        }
     }
-    size_t written = 0;
-    // esp_codec_dev has already configured mono PCM and DAC hardware volume.
-    // Use the channel directly to bound I/O instead of its fixed 1 s timeout.
-    const esp_err_t err =
-        i2s_channel_write(tx_handle_, data, samples * sizeof(int16_t), &written, kIoTimeoutMs);
-    if (err != ESP_OK) {
-        ESP_LOGW(kTag, "ES8311 output failed: %s", esp_err_to_name(err));
+    if (cancelled())
+        return 0;
+    gpio_set_level(AUDIO_CODEC_PA_PIN, 1);
+    int completed = 0;
+    while (completed < samples && !cancelled()) {
+        size_t written = 0;
+        const int frames = std::min(samples - completed, kOutputChunkFrames);
+        const esp_err_t err = i2s_channel_write(
+            tx_handle_, data + completed, frames * sizeof(int16_t), &written, kOutputTimeoutMs);
+        completed += written / sizeof(int16_t);
+        if (err != ESP_OK || written != frames * sizeof(int16_t))
+            break;
     }
-    return written / sizeof(int16_t);
+    // Also covers cancellation between the final check and PA enable above.
+    if (cancelled())
+        gpio_set_level(AUDIO_CODEC_PA_PIN, 0);
+    return completed;
 }
 
 #endif  // AUDIO_USE_AP0316

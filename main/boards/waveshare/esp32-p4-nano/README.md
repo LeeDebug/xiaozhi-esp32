@@ -4,7 +4,7 @@
 
 Set `AUDIO_DEVICE` directly in this board's `config.h` before building:
 
-- `AUDIO_DEVICE_USB_UAC` (default): USB UAC 1.0 microphone and speaker, 48 kHz/16-bit PCM.
+- `AUDIO_DEVICE_USB_UAC`: USB UAC 1.0 microphone and speaker, 48 kHz/16-bit PCM.
 - `AUDIO_DEVICE_ES8311`: original onboard microphone and speaker,
   with 24 kHz capture and playback.
 - `AUDIO_DEVICE_AP0316_ES8311` (mode 6): AP-0316 input on
@@ -12,8 +12,8 @@ Set `AUDIO_DEVICE` directly in this board's `config.h` before building:
   transmitter. See [mode 6 wiring and setup](ap0316-mode6.md).
 
 `config.h` derives `AUDIO_USE_USB_UAC` and `AUDIO_USE_AP0316` from `AUDIO_DEVICE`;
-change only `AUDIO_DEVICE` to select a device. The default preserves the
-previous USB configuration. All modes publish microphone audio levels to the
+change only `AUDIO_DEVICE` to select a device. The current selection is
+`AUDIO_DEVICE_AP0316_ES8311`; the code does not override that selection. All modes publish microphone audio levels to the
 Herdsman UI. Onboard mode restores the board-local configuration
 and `HerdsmanAudioCodec` wrapper from commit `bc1ada61`, the merge base with
 `yishen_v2.4.2__lcd8.8__2.0`. It uses the current shared ES8311 driver, I2C1
@@ -31,6 +31,62 @@ The AP-0316 release names are `esp32-p4-nano-10.1-a-ap0316` and
 display and flash/partition settings of the existing variants. Set
 `AUDIO_DEVICE` to `AUDIO_DEVICE_AP0316_ES8311` before using these separate OTA
 variant names; the release name does not override `config.h`.
+
+## AP-0316 hardware AEC and voice interruption
+
+Both `AUDIO_DEVICE_USB_UAC` (AP-0316 mode 1) and
+`AUDIO_DEVICE_AP0316_ES8311` (mode 6) can interrupt the assistant's speech
+by speaking normally. The AP performs hardware echo cancellation; the P4
+continues microphone capture/VAD while playing and sends a protocol `abort`
+when confirmed speech interrupts the current answer. The server must accept
+realtime listening and `abort` and continue processing the microphone stream.
+The existing `CONFIG_USE_AUDIO_PROCESSOR=y` feature is required for local VAD;
+no new menuconfig option is introduced by this board feature.
+The ordinary ES8311 mode is unaffected. After TTS stop, a bounded quiet
+interval allows late audio packets (especially MQTT/UDP) to reach the playback
+queue before returning to listening; playback must also finish draining.
+The protocol has no response ID: delayed old TTS start/stop events, or an old UDP
+audio packet arriving after a new TTS start, cannot always be distinguished from
+the new response. The finite drain interval reduces tail reordering problems
+but does not provide absolute isolation between network responses.
+
+Configure these switches directly in `config.h`:
+
+| Definition | Default | Meaning |
+| --- | --- | --- |
+| `USB_UAC_HAS_HARDWARE_AEC` | `1` | USB device is AP-0316 with working hardware AEC; set `0` for an ordinary USB sound card. |
+| `AP0316_HAS_HARDWARE_AEC` | `1` | Mode 6 has a connected and working LINE_IN playback reference. |
+| `AUDIO_VOICE_INTERRUPTION_ENABLED` | `1` | Enable local VAD speech interruption when hardware AEC is available. |
+| `AUDIO_VOICE_INTERRUPTION_MIN_SPEECH_MS` | `200` | Minimum continuous speech used to confirm interruption. |
+| `AUDIO_VOICE_INTERRUPTION_PLAYBACK_GUARD_MS` | `300` | Ignore interruption near the start of playback while AEC settles. |
+| `AUDIO_VOICE_INTERRUPTION_PLAYBACK_DRAIN_MS` | `180` | Limited quiet interval after TTS stop and the last audio packet, before finishing drained playback. |
+
+AP-0316 already returns echo-cancelled mono audio. Leave its independent
+reference-channel flag false; `CONFIG_USE_DEVICE_AEC` is not required for
+these hardware AEC paths. That option describes software AEC on the P4.
+Disabling the hardware AEC switch restores the normal non-hardware-AEC path;
+turning off the local interruption switch disables the local VAD abort policy.
+
+For mode 1, connect P4 USB Host to AP J1, microphone to AP J3 and speaker to
+AP J2. Playback must pass through the AP so it can derive its internal USB
+reference; ES8311 and external LINE_IN are not used for this mode.
+Mode 6 needs the ES8311 analog playback reference wired to AP LINE_IN as
+described below. Input and output sample rates may differ because AP and DAC
+use independent I2S controllers and clocks.
+
+USB capture and playback now use separate buffers/locks. Cancellation marks a
+playback generation immediately, then the USB control task suspends/flushes the
+output interface before resuming a new answer. Capture remains active. Mode 6
+mutes the PA immediately and replaces TX DMA contents with silence before the
+next generation. Old queued/in-progress playback generations cannot resume.
+Hardware and USB device buffering can still add a short physical stop tail.
+
+Physical validation is required: playback without speaking must not self-trigger;
+speak while playing and confirm the first syllable reaches the server, playback
+stops, and the next answer plays. Repeat interruptions, idle/new conversations,
+USB removal/reconnection and mute/volume changes. Test at the actual speaker
+volume and microphone distance, then adjust confirmation/guard times for residual
+echo. Verify both transports against the deployed server's realtime/abort support.
 
 ## USB audio
 
