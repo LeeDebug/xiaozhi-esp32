@@ -3,7 +3,7 @@
  * @brief ESP32-P4-Nano 板级配置总表:音频/按键/Modbus/LCD/显示/Herdsman UI 开关与色板.
  *
  * 使用说明:
- * - 音频: AUDIO_USE_USB_UAC=1 使用 USB UAC; =0 使用原有板载 ES8311 音频设备.
+ * - 音频: AUDIO_DEVICE 三选一, AP0316_INPUT_RIGHT_SLOT 选择 AP 输入时隙.
  * - 按键: BOOT_BUTTON_GPIO 为配网/对话复用键(见 esp32-p4-nano.cc InitializeButtons).
  * - 产线: PRODUCTION_MODBUS_* 为 UART1 的端口与 TX/RX 引脚, 波特率等见 production_modbus.cc.
  * - 屏幕: LCD_TYPE 二选一 —— OTA7290B(8.8寸 480x1920) / JD9365(10.1寸 800x1280),
@@ -13,14 +13,21 @@
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
 
-#include <driver/gpio.h> // GPIO_NUM_x / GPIO_NUM_NC 类型定义
-#include <driver/uart.h> // UART_NUM_1 等串口号定义
+#include <driver/gpio.h>  // GPIO_NUM_x / GPIO_NUM_NC 类型定义
+#include <driver/uart.h>  // UART_NUM_1 等串口号定义
 
-/* ===== 音频设备选择: 1=USB UAC(48kHz/16-bit), 0=板载 ES8311(24kHz) ===== */
-#define AUDIO_USE_USB_UAC 1
-#if AUDIO_USE_USB_UAC != 0 && AUDIO_USE_USB_UAC != 1
-#error "AUDIO_USE_USB_UAC must be 0 or 1"
+/* ===== 音频设备三选一:只修改 AUDIO_DEVICE ===== */
+#define AUDIO_DEVICE_ES8311 0         // 板载 ES8311 输入和输出, 24 kHz
+#define AUDIO_DEVICE_USB_UAC 1        // USB UAC 输入和输出, 48 kHz
+#define AUDIO_DEVICE_AP0316_ES8311 2  // AP-0316 输入 48 kHz + ES8311 输出 24 kHz
+#define AUDIO_DEVICE AUDIO_DEVICE_AP0316_ES8311
+
+#if AUDIO_DEVICE != AUDIO_DEVICE_ES8311 && AUDIO_DEVICE != AUDIO_DEVICE_USB_UAC && \
+    AUDIO_DEVICE != AUDIO_DEVICE_AP0316_ES8311
+#error "Unsupported AUDIO_DEVICE"
 #endif
+#define AUDIO_USE_USB_UAC (AUDIO_DEVICE == AUDIO_DEVICE_USB_UAC)
+#define AUDIO_USE_AP0316 (AUDIO_DEVICE == AUDIO_DEVICE_AP0316_ES8311)
 
 /* ===== 外设 I2C:触摸/摄像头/背光共用 I2C1; 板载模式下也供 ES8311 使用 ===== */
 #define PERIPHERAL_I2C_SDA_PIN GPIO_NUM_7
@@ -28,7 +35,11 @@
 
 #if !AUDIO_USE_USB_UAC
 /* 原有板载音频配置, 沿用分叉点 bc1ada61 的采样率与引脚. */
+#if AUDIO_USE_AP0316
+#define AUDIO_INPUT_SAMPLE_RATE 48000
+#else
 #define AUDIO_INPUT_SAMPLE_RATE 24000
+#endif
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000
 #define AUDIO_I2S_GPIO_MCLK GPIO_NUM_13
 #define AUDIO_I2S_GPIO_WS GPIO_NUM_10
@@ -39,6 +50,17 @@
 #define AUDIO_CODEC_I2C_SDA_PIN PERIPHERAL_I2C_SDA_PIN
 #define AUDIO_CODEC_I2C_SCL_PIN PERIPHERAL_I2C_SCL_PIN
 #define AUDIO_CODEC_ES8311_ADDR ES8311_CODEC_DEFAULT_ADDR
+#endif
+
+#if AUDIO_USE_AP0316
+/* AP-0316 模式六: AP 输出时钟, P4 的独立 I2S1 从机接收. 不接 MCLK/D_IN. */
+#define AP0316_I2S_GPIO_BCLK GPIO_NUM_4
+#define AP0316_I2S_GPIO_WS GPIO_NUM_5
+#define AP0316_I2S_GPIO_DIN GPIO_NUM_2
+#define AP0316_INPUT_RIGHT_SLOT 0  // 0=左时隙(WS低), 1=右时隙(WS高)
+#if AP0316_INPUT_RIGHT_SLOT != 0 && AP0316_INPUT_RIGHT_SLOT != 1
+#error "AP0316_INPUT_RIGHT_SLOT must be 0 or 1"
+#endif
 #endif
 
 /* ===== 按键: BOOT 键 —— 启动期短按进配网, 运行期短按切换对话(见 InitializeButtons) ===== */

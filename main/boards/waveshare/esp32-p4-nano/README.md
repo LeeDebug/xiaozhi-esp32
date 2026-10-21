@@ -2,24 +2,35 @@
 
 ## Audio device selection
 
-Set `AUDIO_USE_USB_UAC` in this board's `config.h` before building:
+Set `AUDIO_DEVICE` directly in this board's `config.h` before building:
 
-- `1` (default): use a USB UAC 1.0 microphone and speaker, 48 kHz/16-bit PCM.
-- `0`: use the original onboard microphone, ES8311 codec and speaker header,
+- `AUDIO_DEVICE_USB_UAC` (default): USB UAC 1.0 microphone and speaker, 48 kHz/16-bit PCM.
+- `AUDIO_DEVICE_ES8311`: original onboard microphone and speaker,
   with 24 kHz capture and playback.
+- `AUDIO_DEVICE_AP0316_ES8311` (mode 6): AP-0316 input on
+  I2S1 as a 48 kHz slave receiver; ES8311 output on I2S0 as a 24 kHz master
+  transmitter. See [mode 6 wiring and setup](ap0316-mode6.md).
 
-The switch selects both capture and playback together. Both paths publish audio
-levels to the Herdsman UI. Onboard mode restores the board-local configuration
+`config.h` derives `AUDIO_USE_USB_UAC` and `AUDIO_USE_AP0316` from `AUDIO_DEVICE`;
+change only `AUDIO_DEVICE` to select a device. The default preserves the
+previous USB configuration. All modes publish microphone audio levels to the
+Herdsman UI. Onboard mode restores the board-local configuration
 and `HerdsmanAudioCodec` wrapper from commit `bc1ada61`, the merge base with
 `yishen_v2.4.2__lcd8.8__2.0`. It uses the current shared ES8311 driver, I2C1
 (SDA GPIO7 / SCL GPIO8), MCLK GPIO13, WS GPIO10, BCLK GPIO12, DIN GPIO11,
 DOUT GPIO9 and PA GPIO53. The same I2C bus is shared with touch, camera and
 backlight. USB UAC implementation is excluded by the preprocessor in onboard
-mode, so no UAC USB Host tasks are started. The UAC component dependency and
-its build configuration remain available for switching back to USB mode.
+and AP-0316 modes, so no UAC USB Host tasks are started. The UAC component
+dependency and its build configuration remain available for switching back to USB mode.
 
-This is a build-time choice; change the macro and rebuild to switch devices.
+This is a build-time choice; edit `config.h` and rebuild to switch devices.
 Verify capture, playback and the audio level display with the selected hardware.
+
+The AP-0316 release names are `esp32-p4-nano-10.1-a-ap0316` and
+`esp32-p4x-nano-10.1-a-ap0316`, preserving the corresponding chip revision,
+display and flash/partition settings of the existing variants. Set
+`AUDIO_DEVICE` to `AUDIO_DEVICE_AP0316_ES8311` before using these separate OTA
+variant names; the release name does not override `config.h`.
 
 ## USB audio
 

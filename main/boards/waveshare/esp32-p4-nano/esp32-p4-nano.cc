@@ -3,7 +3,7 @@
  * @brief 微雪 ESP32-P4-Nano 开发板实现:音频/显示/触摸/摄像头/按键/背光/Modbus 总装.
  *
  * 硬件链路一览:
- * - 音频: config.h 的 AUDIO_USE_USB_UAC 选择 USB UAC 或原有板载 ES8311.
+ * - 音频: config.h 的 AUDIO_DEVICE 选择 USB UAC、板载 ES8311 或 AP-0316 输入 + ES8311 输出.
  * - 显示: MIPI-DSI 面板(OTA7290B 8.8寸 / JD9365 10.1寸二选一) + `HerdsmanLcdDisplay`.
  * - 背光: `CustomBacklight` 经 I2C(0x45/0x96) 写亮度.
  * - 触摸: GT911 经同一 I2C 总线接入 LVGL.
@@ -21,6 +21,8 @@
 #include "config.h"
 #if AUDIO_USE_USB_UAC
 #include "usb_uac_audio_codec.h"
+#elif AUDIO_USE_AP0316
+#include "ap0316_audio_codec.h"
 #else
 #include "codecs/es8311_audio_codec.h"
 #include "herdsman_audio_meter.h"
@@ -62,7 +64,7 @@ using WaveshareEsp32p4nanoBase = EthernetBoard;
 using WaveshareEsp32p4nanoBase = WifiBoard;
 #endif
 
-#if !AUDIO_USE_USB_UAC
+#if !AUDIO_USE_USB_UAC && !AUDIO_USE_AP0316
 class HerdsmanAudioCodec : public Es8311AudioCodec {
 public:
     using Es8311AudioCodec::Es8311AudioCodec;
@@ -437,9 +439,11 @@ public:
     }
 
     /** @brief 按 config.h 选择音频编解码器(静态单例). */
-    virtual AudioCodec *GetAudioCodec() override {
+    virtual AudioCodec* GetAudioCodec() override {
 #if AUDIO_USE_USB_UAC
         static UsbUacAudioCodec audio_codec;
+#elif AUDIO_USE_AP0316
+        static Ap0316AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_1);
 #else
         static HerdsmanAudioCodec audio_codec(
             codec_i2c_bus_, I2C_NUM_1, AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
