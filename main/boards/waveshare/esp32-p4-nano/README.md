@@ -222,7 +222,11 @@ chat button. This is a decorative
 amplitude meter, not a frequency spectrum or calibrated sound-pressure meter.
 It allocates no audio buffers and never reads the microphone from the UI thread.
 
-The chart uses seven fixed demo samples labelled “模拟数据”. Feed (blue, 0–1500 kg)
+The top bar, conversation area (including message bubbles), and recommended-question
+panel use the page background color. Startup board/version metadata is hidden from
+the conversation; other system messages remain visible.
+
+The chart uses seven fixed demo samples, with no demo caption or displayed units. Feed (blue, 0–1500 kg)
 and water (purple, 0–200 L) have scales on the left; eggs (green, 0–2500 pcs) have a
 scale on the right. Each series is normalized to its own range before plotting,
 so equal heights indicate equal fractions of their ranges, not equal quantities.

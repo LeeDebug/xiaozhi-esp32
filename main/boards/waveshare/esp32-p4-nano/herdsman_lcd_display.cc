@@ -13,6 +13,7 @@
 #include "boards/common/backlight.h"
 #include "config.h"
 #include "display/lvgl_display/lvgl_theme.h"
+#include "system_info.h"
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -108,9 +109,6 @@ constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD;           // 卡片
 constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER;        // 卡片边框
 constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER;               // 分割线
 constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW;                 // 阴影
-constexpr uint32_t kUserBubble = HERDSMAN_UI_COLOR_USER_BUBBLE;        // 用户聊天气泡
-constexpr uint32_t kAssistantBubble = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE;  // 助手气泡
-constexpr uint32_t kSystemBubble = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE;        // 系统提示气泡
 constexpr uint32_t kAssistantAvatarBackground =
     HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG;                                    // 助手头像底
 constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG;  // 用户头像底
@@ -319,7 +317,11 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     top_bar_ = lv_obj_create(parent);
     lv_obj_set_pos(top_bar_, 12, 8);
     lv_obj_set_size(top_bar_, LV_HOR_RES - 24, kTopBarHeight);
-    StyleCard(top_bar_, 18);
+    lv_obj_set_style_border_width(top_bar_, 0, 0);
+    lv_obj_set_style_shadow_width(top_bar_, 0, 0);
+    lv_obj_set_style_radius(top_bar_, 18, 0);
+    lv_obj_set_style_bg_color(top_bar_, lv_color_hex(kPageBackground), 0);
+    lv_obj_set_style_bg_opa(top_bar_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(top_bar_, 0, 0);
     lv_obj_clear_flag(top_bar_, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -385,7 +387,7 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_size(settings_button, 64, 56);
     lv_obj_align(settings_button, LV_ALIGN_RIGHT_MID, -8, 0);
     lv_obj_set_style_radius(settings_button, 16, 0);
-    lv_obj_set_style_bg_color(settings_button, lv_color_hex(kCardBackground), 0);
+    lv_obj_set_style_bg_color(settings_button, lv_color_hex(kPageBackground), 0);
     lv_obj_set_style_bg_color(settings_button, lv_color_hex(kAccent), LV_STATE_PRESSED);
     lv_obj_set_style_border_width(settings_button, 2, 0);
     lv_obj_set_style_border_color(settings_button, lv_color_hex(kAccent), 0);
@@ -424,7 +426,11 @@ void HerdsmanLcdDisplay::CreateHomeContent(lv_obj_t* parent) {
     content_ = lv_obj_create(parent);
     lv_obj_set_pos(content_, left_panel_width, kTopBarHeight + 24);
     lv_obj_set_size(content_, content_width_, LV_VER_RES - kTopBarHeight - 40);
-    StyleCard(content_, 24);
+    lv_obj_set_style_border_width(content_, 0, 0);
+    lv_obj_set_style_shadow_width(content_, 0, 0);
+    lv_obj_set_style_radius(content_, 24, 0);
+    lv_obj_set_style_bg_color(content_, lv_color_hex(kPageBackground), 0);
+    lv_obj_set_style_bg_opa(content_, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(content_, 0, 0);
     lv_obj_clear_flag(content_, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -566,7 +572,6 @@ void HerdsmanLcdDisplay::CreateProductionChart(lv_obj_t* parent) {
 
     constexpr uint32_t colors[] = {0x398BFF, 0xA56AFF, 0x50C878};
     constexpr int maxima[] = {1500, 200, 2500};
-    constexpr const char* units[] = {"kg", "L", "pcs"};
     constexpr const char* names[] = {"料", "水", "蛋"};
     constexpr int data[3][7] = {{900, 650, 420, 1050, 1100, 460, 1008},
                                 {20, 150, 175, 120, 112, 25, 108},
@@ -577,12 +582,8 @@ void HerdsmanLcdDisplay::CreateProductionChart(lv_obj_t* parent) {
         lv_obj_set_width(value, width / 3);
         lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_text_color(value, lv_color_hex(colors[i]), 0);
-        lv_label_set_text_fmt(value, "%s\n%d %s", names[i], data[i][6], units[i]);
+        lv_label_set_text_fmt(value, "%s\n%d", names[i], data[i][6]);
     }
-    lv_obj_t* caption = lv_label_create(panel);
-    lv_label_set_text(caption, "模拟数据");
-    lv_obj_set_style_text_color(caption, lv_color_hex(kMutedText), 0);
-    lv_obj_align(caption, LV_ALIGN_TOP_MID, 0, 80);
 
     const int axis_width = std::clamp(width / 8, 44, 64);
     const int plot_x = axis_width * 2;
@@ -609,10 +610,6 @@ void HerdsmanLcdDisplay::CreateProductionChart(lv_obj_t* parent) {
             lv_chart_set_series_value_by_id(chart, series, j, data[i][j] * 1000 / maxima[i]);
         }
         const int x = i < 2 ? i * axis_width : plot_x + plot_width + 4;
-        lv_obj_t* unit = lv_label_create(panel);
-        lv_label_set_text(unit, units[i]);
-        lv_obj_set_style_text_color(unit, lv_color_hex(colors[i]), 0);
-        lv_obj_set_pos(unit, x, plot_y - 34);
         for (int tick = 0; tick < 5; ++tick) {
             lv_obj_t* label = lv_label_create(panel);
             lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
@@ -637,7 +634,7 @@ void HerdsmanLcdDisplay::CreateStandbyPanel() {
     standby_panel_ = lv_obj_create(content_);
     lv_obj_set_size(standby_panel_, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(standby_panel_, 0, 0);
-    lv_obj_set_style_bg_color(standby_panel_, lv_color_hex(kCardBackground), 0);
+    lv_obj_set_style_bg_color(standby_panel_, lv_color_hex(kPageBackground), 0);
     lv_obj_set_style_bg_opa(standby_panel_, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(standby_panel_, 0, 0);
     lv_obj_set_style_radius(standby_panel_, 24, 0);
@@ -846,6 +843,10 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (!setup_ui_called_ || chat_list_ == nullptr || content == nullptr) {
         return;
     }
+    // Keep startup board/version metadata out of the conversation on this dashboard.
+    if (std::strcmp(role, "system") == 0 && SystemInfo::GetUserAgent() == content) {
+        return;
+    }
 
     DisplayLockGuard lock(this);
     if (content[0] == '\0') {
@@ -905,9 +906,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_set_style_radius(bubble, 18, 0);
     lv_obj_set_style_border_width(bubble, 0, 0);
     lv_obj_set_style_pad_all(bubble, 14, 0);
-    lv_obj_set_style_bg_color(
-        bubble,
-        lv_color_hex(is_user ? kUserBubble : (is_assistant ? kAssistantBubble : kSystemBubble)), 0);
+    lv_obj_set_style_bg_color(bubble, lv_color_hex(kPageBackground), 0);
     lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
 
