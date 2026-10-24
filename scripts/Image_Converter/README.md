@@ -49,7 +49,15 @@ python lvgl_tools_gui.py
 使用命令行转换 png 图片
 ```bash
 python LVGLImage.py --ofmt C --cf RGB565A8 -o ./output logo_big-herdsman.png
+python LVGLImage.py --ofmt C --cf RGB565 -o ./output logo_big-herdsman.png
+# 无法使用自动
 python LVGLImage.py --ofmt C --cf auto -o ./output logo__qingdao_tsg.png
+# usage: LVGLImage.py [-h] [--ofmt {C,BIN,PNG}]
+#                     [--cf {L8,I1,I2,I4,I8,A1,A2,A4,A8,ARGB8888,XRGB8888,RGB565,RGB565A8,ARGB8565,RGB888,AUTO,RAW,RAW_ALPHA}]
+#                     [--rgb565dither] [--premultiply] [--compress {NONE,RLE,LZ4}] [--align [byte]]
+#                     [--background [color]] [-o OUTPUT] [-v]
+#                     input
+# LVGLImage.py: error: argument --cf: invalid choice: 'auto' (choose from 'L8', 'I1', 'I2', 'I4', 'I8', 'A1', 'A2', 'A4', 'A8', 'ARGB8888', 'XRGB8888', 'RGB565', 'RGB565A8', 'ARGB8565', 'RGB888', 'AUTO', 'RAW', 'RAW_ALPHA')
 ```
 
 使用命令行转换 gif 图片
