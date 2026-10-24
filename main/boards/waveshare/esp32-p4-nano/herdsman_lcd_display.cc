@@ -28,7 +28,7 @@
 #include <ctime>
 
 extern "C" {
-LV_IMAGE_DECLARE(logo);
+LV_IMAGE_DECLARE(logo_yishen);
 }
 
 LV_FONT_DECLARE(font_herdsman_ui_30_4);
@@ -326,7 +326,7 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_clear_flag(top_bar_, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* brand = lv_image_create(top_bar_);
-    lv_image_set_src(brand, &logo);
+    lv_image_set_src(brand, &logo_yishen);
     const int logo_width = std::min(side_column_width_ - 32, 368);
     lv_obj_set_size(brand, logo_width, 60);
     lv_image_set_inner_align(brand, LV_IMAGE_ALIGN_CONTAIN);
