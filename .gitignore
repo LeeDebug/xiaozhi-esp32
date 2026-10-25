@@ -1,3 +1,5 @@
+.workbuddy/
+
 tmp/
 components/*
 !components/fb_gfx/
