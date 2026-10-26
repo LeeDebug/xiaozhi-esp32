@@ -222,8 +222,9 @@ chat button. This is a decorative
 amplitude meter, not a frequency spectrum or calibrated sound-pressure meter.
 It allocates no audio buffers and never reads the microphone from the UI thread.
 
-The top bar, conversation area (including message bubbles), and recommended-question
-panel use the page background color. Startup board/version metadata is hidden from
+The top bar, conversation area, and recommended-question panel use the page
+background color. Rounded message bubbles use the theme's user, assistant, and
+system bubble colors to distinguish messages. Startup board/version metadata is hidden from
 the conversation; other system messages remain visible.
 
 The chart uses seven fixed demo samples, with no demo caption or displayed units. Feed (blue, 0–1500 kg)
@@ -243,6 +244,21 @@ python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/board
 For this firmware's include layout, use `"lvgl.h"` in the generated C file's
 `LV_BUILD_TEST` include branch as well. Board Kconfig selects the canvas and chart widgets
 and Montserrat 14 tick font; no generated sdkconfig should be edited by hand.
+
+Chat avatars use `resources/ai.png` for assistant messages and `resources/me.png`
+for user messages. Keep both PNGs at 54 × 54 pixels with an alpha channel; they
+are displayed at native size inside circular containers. Regenerate their
+ARGB8888 assets after replacing the PNGs:
+
+```sh
+python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/boards/waveshare/esp32-p4-nano/assets main/boards/waveshare/esp32-p4-nano/resources/ai.png
+python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/boards/waveshare/esp32-p4-nano/assets main/boards/waveshare/esp32-p4-nano/resources/me.png
+```
+
+Use `"lvgl.h"` in the generated avatars' `LV_BUILD_TEST` include branch too.
+Check avatar transparency, circular clipping, and left/right message alignment
+on the LCD after flashing.
+
 Hardware checks: logo transparency, ruler alignment on both LCD sizes, settings
 and chat touch targets, listening response, doubled excursion, minimum bars while speaking or idle,
 silence decay, interruption,

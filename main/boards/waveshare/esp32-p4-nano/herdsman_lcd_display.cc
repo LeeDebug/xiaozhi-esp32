@@ -28,7 +28,9 @@
 #include <ctime>
 
 extern "C" {
+LV_IMAGE_DECLARE(ai);
 LV_IMAGE_DECLARE(logo);
+LV_IMAGE_DECLARE(me);
 }
 
 LV_FONT_DECLARE(font_herdsman_ui_30_4);
@@ -109,10 +111,12 @@ constexpr uint32_t kCardBackground = HERDSMAN_UI_COLOR_CARD;           // 卡片
 constexpr uint32_t kCardBorder = HERDSMAN_UI_COLOR_CARD_BORDER;        // 卡片边框
 constexpr uint32_t kDivider = HERDSMAN_UI_COLOR_DIVIDER;               // 分割线
 constexpr uint32_t kShadow = HERDSMAN_UI_COLOR_SHADOW;                 // 阴影
+constexpr uint32_t kUserBubbleBackground = HERDSMAN_UI_COLOR_USER_BUBBLE;
+constexpr uint32_t kAssistantBubbleBackground = HERDSMAN_UI_COLOR_ASSISTANT_BUBBLE;
+constexpr uint32_t kSystemBubbleBackground = HERDSMAN_UI_COLOR_SYSTEM_BUBBLE;
 constexpr uint32_t kAssistantAvatarBackground =
     HERDSMAN_UI_COLOR_ASSISTANT_AVATAR_BG;                                    // 助手头像底
 constexpr uint32_t kUserAvatarBackground = HERDSMAN_UI_COLOR_USER_AVATAR_BG;  // 用户头像底
-constexpr uint32_t kUserAvatarForeground = HERDSMAN_UI_COLOR_USER_AVATAR_FG;  // 用户头像字
 constexpr uint32_t kSuccess = HERDSMAN_UI_COLOR_SUCCESS;                      // 成功绿(在线/联网)
 constexpr uint32_t kDanger = HERDSMAN_UI_COLOR_DANGER;                        // 危险红(错误/离线)
 
@@ -878,35 +882,36 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_column(row, 12, 0);
 
-    auto create_avatar = [&](const char* icon, uint32_t background, uint32_t foreground) {
+    auto create_avatar = [&](const lv_image_dsc_t* image, uint32_t background) {
         lv_obj_t* avatar = lv_obj_create(row);
         lv_obj_set_size(avatar, 54, 54);
         lv_obj_set_style_radius(avatar, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_clip_corner(avatar, true, 0);
         lv_obj_set_style_bg_color(avatar, lv_color_hex(background), 0);
         lv_obj_set_style_bg_opa(avatar, LV_OPA_COVER, 0);
         lv_obj_set_style_border_width(avatar, 0, 0);
         lv_obj_set_style_pad_all(avatar, 0, 0);
         lv_obj_clear_flag(avatar, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_t* avatar_icon = lv_label_create(avatar);
-        auto* theme = static_cast<LvglTheme*>(current_theme_);
-        lv_obj_set_style_text_font(avatar_icon, theme->large_icon_font()->font(), 0);
-        lv_obj_set_style_text_color(avatar_icon, lv_color_hex(foreground), 0);
-        lv_label_set_text(avatar_icon, icon);
-        lv_obj_center(avatar_icon);
+        lv_obj_t* avatar_image = lv_image_create(avatar);
+        lv_image_set_src(avatar_image, image);
+        lv_obj_center(avatar_image);
     };
 
     if (is_assistant) {
-        create_avatar(MATERIAL_SYMBOLS_ROBOT_2, kAssistantAvatarBackground, kAccent);
+        create_avatar(&ai, kAssistantAvatarBackground);
     }
 
     lv_obj_t* bubble = lv_obj_create(row);
     const int bubble_width = (is_user || is_assistant) ? chat_bubble_width_ : system_bubble_width_;
+    const uint32_t bubble_background = is_user        ? kUserBubbleBackground
+                                       : is_assistant ? kAssistantBubbleBackground
+                                                      : kSystemBubbleBackground;
     lv_obj_set_width(bubble, bubble_width);
     lv_obj_set_height(bubble, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(bubble, 18, 0);
     lv_obj_set_style_border_width(bubble, 0, 0);
     lv_obj_set_style_pad_all(bubble, 14, 0);
-    lv_obj_set_style_bg_color(bubble, lv_color_hex(kPageBackground), 0);
+    lv_obj_set_style_bg_color(bubble, lv_color_hex(bubble_background), 0);
     lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
     lv_obj_clear_flag(bubble, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -918,7 +923,7 @@ void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
     chat_message_label_ = text;
 
     if (is_user) {
-        create_avatar(MATERIAL_SYMBOLS_PERSON, kUserAvatarBackground, kUserAvatarForeground);
+        create_avatar(&me, kUserAvatarBackground);
     }
 
     lv_obj_scroll_to_view_recursive(row, LV_ANIM_ON);
