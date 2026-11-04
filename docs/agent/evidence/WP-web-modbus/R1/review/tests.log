@@ -1,0 +1,30 @@
+✔ CRC agrees with published Modbus example and ASCII check vector (0.732708ms)
+✔ hex parser rejects partial, invalid and empty input (0.793084ms)
+✔ 03 responds with big-endian register bytes, including all 78 firmware registers (0.266167ms)
+✔ 06 echoes request, mutates one register, and subsequent read observes it (0.164792ms)
+✔ invalid function, range, and quantity return appropriate exception frames (0.120875ms)
+✔ CRC, malformed requests, and foreign addresses are silent and never write (0.089875ms)
+✔ broadcast writes update without replying; reads and invalid writes remain silent (0.058917ms)
+✔ silo low-word-first int32 encoding is returned unchanged on wire (0.049208ms)
+✔ decoder handles every split position and multiple concatenated frames (0.229916ms)
+✔ decoder recovers following noise, corrupt CRC, and truncated prefixes (0.144375ms)
+✔ unsupported function is extracted at idle and receives illegal-function exception (0.062875ms)
+✔ variable-length unsupported request is recognized and known short request is discarded (0.060083ms)
+✔ decoder bounds noise retention and diagnostics, and reset clears pending bytes (25.020875ms)
+✔ opens with firmware 9600-8N1 settings; receives raw bytes and writes without encoding (6.065708ms)
+✔ ordered queue waits for each actual write; writer lock is released between frames (0.719958ms)
+✔ disconnect cancels delayed responses and queued responses without writing (0.322208ms)
+✔ queue is bounded and remains clean after overflow and close (0.565709ms)
+✔ read failure automatically closes and releases reader with queued response canceled (0.353042ms)
+✔ read EOF cleans up as a disconnect (0.211541ms)
+✔ write rejection releases its lock and does not poison subsequent queue tasks (0.352042ms)
+✔ port open failure does not acquire readers or prevent retry (0.202666ms)
+✔ concurrent close calls share cleanup and session can reopen (0.165ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.988708

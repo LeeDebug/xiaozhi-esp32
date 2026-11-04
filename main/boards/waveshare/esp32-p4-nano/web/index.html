@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="ESP32-P4 Nano 产线 Modbus RTU 从机模拟器：Web Serial、寄存器编辑及报文解析">
+<title>Modbus Lab · P4 Nano 从机模拟器</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.mjs"></script>
+</head>
+<body>
+<header><div class="brand"><span class="mark">M</span><div><b>MODBUS <span>LAB</span></b><small>ESP32-P4 NANO / 产线设备模拟器</small></div></div><span id="status" class="pill">● 未连接</span></header>
+<main>
+<aside>
+<section class="panel"><div class="eyebrow">01 / CONNECTION</div><h2>串口连接</h2><p class="muted">电脑模拟从机，接收单片机的 RTU 请求。</p>
+<form id="connection"><label>从机地址<input id="address" type="number" min="1" max="247" value="1" required></label><div class="pair"><label>波特率<select id="baud"><option>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></select></label><label>格式<input value="8N1" disabled></label></div><label>接收空闲帧间隔 / ms<input id="frame-gap" type="number" min="1" max="1000" step="1" value="4" required></label><p class="hint">空闲达到此间隔才校验整帧。9600-8N1 默认 4 ms；USB 分片延迟大时可调高。连接期间锁定。</p><button id="connect" class="primary" type="submit">连接串口</button><button id="disconnect" type="button" disabled>断开连接</button></form>
+<p id="support" class="hint">使用桌面 Chrome / Edge，通过 localhost 或 HTTPS 打开。</p>
+<hr><label class="check"><input type="checkbox" id="respond" checked> 自动响应请求</label><label>响应延迟 / ms<input id="delay" type="number" min="0" max="3000" value="0"></label><p class="hint">固件等待响应 1000 ms。关闭自动响应或增加延迟可模拟超时。</p>
+</section>
+<section class="panel wiring"><div class="eyebrow">WIRING / 接线</div><h3>连接业务串口</h3><p>P4 UART1 · TX GPIO20 / RX GPIO21<br>9600 baud · 8 data · no parity · 1 stop</p><p>RS485：USB-RS485 的 A/B 连接板端收发器 A/B，按模块要求共地。使用自动方向切换适配器。</p><p>TTL：仅在板端为 3.3V UART 时交叉连接 TX ↔ RX，并共地。<strong>不要将 RS485 A/B 直接接 GPIO。</strong></p><p class="hint">选择连接业务总线的适配器；开发板下载 / 日志口不等于 UART1。适配器应关闭本地回显。</p></section>
+</aside>
+<div class="workspace">
+<div class="intro"><div><div class="eyebrow">DEVICE WORKBENCH</div><h1>让设备数据，按你的设定响应。</h1><p>观察每一条指令，调整返回值，验证单片机的读写行为。</p></div><span class="chip">RTU · 03 / 06</span></div>
+<div class="stats"><div><small>收到请求</small><b id="rx-count">0</b></div><div><small>发出响应</small><b id="tx-count">0</b></div><div><small>丢弃 / 异常</small><b id="error-count">0</b></div><div><small>保持寄存器</small><b>167 <em>个</em></b></div></div>
+<div id="notice" role="status" aria-live="polite">就绪。可先使用下方「离线试报文」，无需连接硬件。</div>
+<section class="panel"><div class="section-head"><div><div class="eyebrow">02 / SIMULATED VALUES</div><h2>模拟设备数据</h2></div><span class="hint">修改后立即生效 · 自动保存在本机</span></div>
+<form id="values"><div class="value-grid"><label>主水阀 <small>0x6B</small><select id="valve"><option value="0">0 · 无状态</option><option value="1">1 · 打开</option><option value="2">2 · 关闭</option></select></label><label>水温 / °C <small>0x6C × 0.001</small><input id="temperature" type="number" min="0" max="65.535" step="0.001" required></label><label>灯光一 / % <small>0x3B</small><input id="light1" type="number" min="0" max="100" required></label><label>灯光二 / % <small>0x3C</small><input id="light2" type="number" min="0" max="100" required></label></div><div id="silos" class="value-grid"></div></form><p class="hint">料塔为有符号 int32，低字在前、每个字高字节在前。水温按固件 uint16 解释，范围 0–65.535 °C。</p>
+<div class="toolbar"><button id="export">导出设置</button><label class="button">导入设置<input id="import" type="file" accept="application/json,.json" hidden></label><button id="reset">恢复示例数据</button><span id="saved" class="hint">数据仅保存在当前浏览器</span></div></section>
+<section class="panel"><div class="section-head"><div><div class="eyebrow">03 / TRAFFIC INSPECTOR</div><h2>通讯监视器</h2></div><div class="toolbar"><label class="check"><input id="follow" type="checkbox" checked> 跟随</label><button id="download-log">导出日志</button><button id="clear-log">清空</button></div></div><div class="log-head"><span>时间 / 方向</span><span>原始报文 & 指令解析</span></div><div id="log" class="log" aria-label="收发日志"><div class="empty">等待请求。真实串口与离线报文会分别标记。</div></div><p class="hint">显示 CRC、从机地址、功能码、寄存器范围和读写值；最多保留 300 条。按接收空闲间隔划帧；噪声 / CRC 错误整帧丢弃，不扫描有效子帧，其他地址不响应。</p>
+<details open><summary>离线试报文 <span class="hint">仅运行解析，不发送到串口</span></summary><div class="toolbar samples"><button data-sample="temperature">读取水温</button><button data-sample="lights">读取两路灯光</button><button data-sample="weight">读取料塔一</button><button data-sample="valve">打开水阀</button></div><form id="inject-form" class="inject"><label class="sr-only" for="frame">十六进制 RTU 请求（含 CRC）</label><input id="frame" placeholder="01 03 00 6C 00 01 44 17" autocomplete="off" spellcheck="false" required><button class="primary">解析并模拟</button></form><p class="hint">请输入含 CRC 的十六进制完整帧。离线写入也会更新模拟数据。</p></details></section>
+<section class="panel"><div class="section-head"><div><div class="eyebrow">04 / REGISTER BANK</div><h2>保持寄存器</h2></div><label class="search">筛选地址 / 名称<input id="filter" placeholder="例如 0x6C、水温、料塔"></label></div><div class="table-wrap"><table><thead><tr><th>地址 DEC / HEX</th><th>用途</th><th>原始值 uint16</th><th>HEX</th></tr></thead><tbody id="registers"></tbody></table></div><p class="hint">地址为协议零基偏移，非 4xxxx 编号。未命名寄存器默认 0；105 为保留位，可编辑原始值。通用编辑不限制业务取值。</p></section>
+<footer>固件：production_modbus.cc · production_mcp_tools.cc · 自动轮询关闭，需主动触发 MCP 读写。</footer>
+</div></main>
+</body></html>

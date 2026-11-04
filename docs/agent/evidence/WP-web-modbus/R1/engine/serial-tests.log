@@ -1,0 +1,17 @@
+✔ opens with firmware 9600-8N1 settings; receives raw bytes and writes without encoding (3.579625ms)
+✔ ordered queue waits for each actual write; writer lock is released between frames (0.738875ms)
+✔ disconnect cancels delayed responses and queued responses without writing (0.385042ms)
+✔ queue is bounded and remains clean after overflow and close (0.550083ms)
+✔ read failure automatically closes and releases reader with queued response canceled (0.289084ms)
+✔ read EOF cleans up as a disconnect (0.1765ms)
+✔ write rejection releases its lock and does not poison subsequent queue tasks (0.279167ms)
+✔ port open failure does not acquire readers or prevent retry (0.112667ms)
+✔ concurrent close calls share cleanup and session can reopen (0.132167ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.387292

@@ -1,0 +1,26 @@
+✔ CRC agrees with published Modbus example and ASCII check vector (0.769833ms)
+✔ hex parser rejects partial, invalid and empty input (0.332958ms)
+✔ 03 responds with big-endian register bytes, including all 78 firmware registers (0.210792ms)
+✔ 06 echoes request, mutates one register, and subsequent read observes it (0.148042ms)
+✔ invalid function, range, and quantity return appropriate exception frames (0.131375ms)
+✔ CRC, malformed requests, and foreign addresses are silent and never write (0.074958ms)
+✔ broadcast writes update without replying; reads and invalid writes remain silent (0.056625ms)
+✔ silo low-word-first int32 encoding is returned unchanged on wire (0.041958ms)
+✔ decoder emits exactly once at a confirmed gap for every USB split position (0.17275ms)
+✔ requests without an intervening gap are rejected as one interval and never execute writes (0.098458ms)
+✔ valid-looking writes inside noisy or CRC-invalid intervals are never extracted (0.123ms)
+✔ complete unsupported function is emitted at idle and receives illegal-function exception (0.064959ms)
+✔ variable-length unknown function is handled whole even with an embedded valid write (0.338959ms)
+✔ 03/06 with valid CRC but incorrect length are discarded as entire intervals (0.054375ms)
+✔ overflow invalidates the whole interval including a CRC-valid retained prefix and valid tail (3.706042ms)
+✔ reset clears pending and overflow state without a callback (0.10775ms)
+✔ invalid RTU address is rejected despite a correct whole-frame CRC (0.039542ms)
+✔ frame and discard callbacks observe reset state and may enqueue the next interval (0.065875ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41.662042
