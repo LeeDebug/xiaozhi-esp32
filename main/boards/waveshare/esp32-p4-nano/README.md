@@ -217,7 +217,13 @@ Only TX and RX are configured. The external RS485 transceiver must provide autom
 The existing MIPI display rotation provides a landscape dashboard (1920 x 480
 for OTA7290B, 1280 x 800 for JD9365). The top bar shows the transparent brand
 logo on the left and the settings button on the right. The clock is right-aligned
-to the left of the Wi-Fi, battery, mute, and settings slots, separate from status text. The home content uses
+to the left of the Wi-Fi, Ethernet, battery, mute, and settings slots, separate from status text.
+Wi-Fi and Ethernet indicators refresh independently on every status-bar tick (including
+backup-interface changes). Wi-Fi shows green signal bars when connected and a gray
+off icon when disconnected. The RJ45 Ethernet icon is green with a usable IPv4
+address, amber while the link is up awaiting an address, and gray with a diagonal
+slash when disconnected or disabled in a Wi-Fi-only build. These indicators show
+local interface readiness, not server reachability or which interface is primary. The home content uses
 20% / 50% / 30% columns for the audio meter, conversation, and production chart.
 The legacy `HERDSMAN_UI_SHOW_LEFT_LOGO` and `HERDSMAN_UI_SHOW_RIGHT_BUTTONS`
 switches now control the audio/control column and production chart respectively.

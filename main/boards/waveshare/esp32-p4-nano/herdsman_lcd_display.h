@@ -55,6 +55,9 @@ private:
     lv_obj_t* settings_time_label_ = nullptr;
     lv_obj_t* signal_value_label_ = nullptr;
     lv_obj_t* date_time_label_ = nullptr;
+    lv_obj_t* wifi_status_label_ = nullptr;
+    lv_obj_t* ethernet_status_icon_ = nullptr;
+    lv_obj_t* ethernet_disconnected_line_ = nullptr;
     lv_obj_t* settings_button_label_ = nullptr;
     lv_obj_t* settings_button_icon_ = nullptr;
     lv_obj_t* chat_button_label_ = nullptr;
@@ -72,6 +75,7 @@ private:
     void UpdateHomeState();
     void UpdateDateTime();
     void UpdateSignalStrength();
+    void UpdateNetworkIcons();
     void UpdateSettingsTime();
     void UpdateSettingsValues();
     void ShowSettings(bool show);

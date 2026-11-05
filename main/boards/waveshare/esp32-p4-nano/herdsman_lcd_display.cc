@@ -17,6 +17,7 @@
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_netif.h>
 #include <fb_gfx.h>
 #include <material_symbols.h>
 #include <src/misc/cache/lv_cache.h>
@@ -309,6 +310,7 @@ void HerdsmanLcdDisplay::SetupUI() {
         25, this);
     UpdateDateTime();
     UpdateSignalStrength();
+    UpdateNetworkIcons();
     UpdateHomeState();
     lv_obj_update_layout(screen);
     lv_obj_invalidate(screen);
@@ -336,16 +338,47 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_image_set_inner_align(brand, LV_IMAGE_ALIGN_CONTAIN);
     lv_obj_align(brand, LV_ALIGN_LEFT_MID, 16, 0);
 
-    network_label_ = lv_label_create(top_bar_);
-    lv_obj_set_style_text_font(network_label_, icon_font, 0);
-    lv_obj_set_style_text_color(network_label_, lv_color_hex(kIcon), 0);
-    lv_label_set_text(network_label_, MATERIAL_SYMBOLS_WIFI);
-    lv_obj_align(network_label_, LV_ALIGN_RIGHT_MID, -92, 0);
+    // Keep these separate from LvglDisplay's single active-uplink label.
+    // Backup interface changes must remain visible even without an app network event.
+    wifi_status_label_ = lv_label_create(top_bar_);
+    lv_obj_set_style_text_font(wifi_status_label_, icon_font, 0);
+    lv_obj_set_style_text_color(wifi_status_label_, lv_color_hex(kMutedText), 0);
+    lv_label_set_text(wifi_status_label_, MATERIAL_SYMBOLS_WIFI_OFF);
+    lv_obj_align(wifi_status_label_, LV_ALIGN_RIGHT_MID, -92, 0);
+
+    ethernet_status_icon_ = lv_obj_create(top_bar_);
+    MakePlain(ethernet_status_icon_);
+    lv_obj_set_size(ethernet_status_icon_, 40, 40);
+    lv_obj_clear_flag(ethernet_status_icon_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(ethernet_status_icon_, LV_ALIGN_RIGHT_MID, -148, 0);
+    // RJ45 socket outline and contacts, independent of the bundled font glyphs.
+    static const lv_point_precise_t socket[] = {
+        {4, 7}, {36, 7}, {36, 27}, {27, 27}, {27, 34}, {13, 34}, {13, 27}, {4, 27}, {4, 7},
+    };
+    static const lv_point_precise_t contacts[][2] = {
+        {{11, 8}, {11, 17}},
+        {{17, 8}, {17, 17}},
+        {{23, 8}, {23, 17}},
+        {{29, 8}, {29, 17}},
+    };
+    auto add_line = [this](const lv_point_precise_t* points, uint32_t count) {
+        auto* line = lv_line_create(ethernet_status_icon_);
+        lv_line_set_points(line, points, count);
+        lv_obj_set_style_line_width(line, 3, 0);
+        lv_obj_set_style_line_color(line, lv_color_hex(kMutedText), 0);
+        return line;
+    };
+    add_line(socket, sizeof(socket) / sizeof(socket[0]));
+    for (const auto& contact : contacts) {
+        add_line(contact, 2);
+    }
+    static const lv_point_precise_t disconnected[] = {{3, 3}, {37, 37}};
+    ethernet_disconnected_line_ = add_line(disconnected, 2);
 
     status_bar_ = lv_obj_create(top_bar_);
     // Reserve the right-hand clock and icon slots so status text cannot overlap them.
     constexpr int kClockWidth = 360;
-    constexpr int kClockRightOffset = 256;
+    constexpr int kClockRightOffset = 312;
     const int status_width = std::max(120, static_cast<int>(LV_HOR_RES) - 24 - side_column_width_ -
                                                kClockWidth - kClockRightOffset - 24);
     lv_obj_set_size(status_bar_, status_width, kTopBarHeight);
@@ -372,13 +405,13 @@ void HerdsmanLcdDisplay::CreateTopBar(lv_obj_t* parent) {
     lv_obj_set_style_text_font(mute_label_, icon_font, 0);
     lv_obj_set_style_text_color(mute_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(mute_label_, "");
-    lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -200, 0);
+    lv_obj_align(mute_label_, LV_ALIGN_RIGHT_MID, -256, 0);
 
     battery_label_ = lv_label_create(top_bar_);
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lv_color_hex(kIcon), 0);
     lv_label_set_text(battery_label_, "");
-    lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -148, 0);
+    lv_obj_align(battery_label_, LV_ALIGN_RIGHT_MID, -204, 0);
 
     date_time_label_ = lv_label_create(top_bar_);
     lv_obj_set_width(date_time_label_, kClockWidth);
@@ -802,6 +835,9 @@ void HerdsmanLcdDisplay::SetTheme(Theme* theme) {
     const lv_font_t* icon_font =
         lvgl_theme->large_icon_font() != nullptr ? lvgl_theme->large_icon_font()->font() : nullptr;
     if (icon_font != nullptr) {
+        if (wifi_status_label_ != nullptr) {
+            lv_obj_set_style_text_font(wifi_status_label_, icon_font, 0);
+        }
         if (settings_button_icon_ != nullptr) {
             lv_obj_set_style_text_font(settings_button_icon_, icon_font, 0);
         }
@@ -841,6 +877,7 @@ void HerdsmanLcdDisplay::UpdateStatusBar(bool update_all) {
     DisplayLockGuard lock(this);
     UpdateDateTime();
     UpdateSignalStrength();
+    UpdateNetworkIcons();
 }
 
 void HerdsmanLcdDisplay::SetChatMessage(const char* role, const char* content) {
@@ -995,6 +1032,42 @@ void HerdsmanLcdDisplay::UpdateDateTime() {
     lv_label_set_text(date_time_label_, time_text);
 }
 
+void HerdsmanLcdDisplay::UpdateNetworkIcons() {
+    if (wifi_status_label_ == nullptr || ethernet_status_icon_ == nullptr) {
+        return;
+    }
+    auto& wifi = WifiManager::GetInstance();
+    const bool wifi_connected = wifi.IsConnected();
+    const char* wifi_icon = MATERIAL_SYMBOLS_WIFI_OFF;
+    if (wifi_connected) {
+        const int rssi = wifi.GetRssi();
+        wifi_icon = rssi >= -65   ? MATERIAL_SYMBOLS_WIFI
+                    : rssi >= -75 ? MATERIAL_SYMBOLS_WIFI_2_BAR
+                                  : MATERIAL_SYMBOLS_WIFI_1_BAR;
+    }
+    lv_label_set_text(wifi_status_label_, wifi_icon);
+    lv_obj_set_style_text_color(wifi_status_label_,
+                                lv_color_hex(wifi_connected ? kSuccess : kMutedText), 0);
+
+    bool link_up = false;
+    bool ip_ready = false;
+#if CONFIG_XIAOZHI_NETWORK_ETHERNET
+    auto* netif = esp_netif_get_handle_from_ifkey("ETH_DEF");
+    link_up = netif != nullptr && esp_netif_is_netif_up(netif);
+    esp_netif_ip_info_t ip = {};
+    ip_ready = link_up && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
+#endif
+    const auto color = lv_color_hex(ip_ready ? kSuccess : (link_up ? 0xF59E0B : kMutedText));
+    for (uint32_t i = 0; i < lv_obj_get_child_count(ethernet_status_icon_); ++i) {
+        lv_obj_set_style_line_color(lv_obj_get_child(ethernet_status_icon_, i), color, 0);
+    }
+    if (link_up) {
+        lv_obj_add_flag(ethernet_disconnected_line_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(ethernet_disconnected_line_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 void HerdsmanLcdDisplay::UpdateSignalStrength() {
     if (signal_value_label_ == nullptr) {
         return;
@@ -1056,6 +1129,7 @@ void HerdsmanLcdDisplay::ShowSettings(bool show) {
     if (show) {
         UpdateSettingsTime();
         UpdateSignalStrength();
+        UpdateNetworkIcons();
         UpdateSettingsValues();
         lv_obj_remove_flag(settings_panel_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(settings_panel_);
