@@ -14,7 +14,7 @@
 #include "sdkconfig.h"
 
 #if CONFIG_XIAOZHI_NETWORK_ETHERNET
-#include "ethernet_board.h"
+#include "ethernet_wifi_board.h"
 #else
 #include "wifi_board.h"
 #endif
@@ -30,16 +30,16 @@
 #include "application.h"
 #include "herdsman_lcd_display.h"
 // #include "display/no_display.h"
+#include "button.h"
 #include "production_mcp_tools.h"
 #include "production_modbus.h"
-#include "button.h"
 
+#include "esp_cam_sensor_xclk.h"
 #include "esp_video.h"
 #include "esp_video_init.h"
-#include "esp_cam_sensor_xclk.h"
 
-#include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_lcd_panel_ops.h"
 #include "esp_ldo_regulator.h"
 
 #include "esp_lcd_mipi_dsi.h"
@@ -52,14 +52,14 @@
 #error "Unsupported LCD_TYPE"
 #endif
 
-#include <esp_log.h>
 #include <driver/i2c_master.h>
+#include <esp_log.h>
 #include <esp_lvgl_port.h>
 #include "esp_lcd_touch_gt911.h"
 #define TAG "WaveshareEsp32p4nano"
 
 #if CONFIG_XIAOZHI_NETWORK_ETHERNET
-using WaveshareEsp32p4nanoBase = EthernetBoard;
+using WaveshareEsp32p4nanoBase = EthernetWifiBoard;
 #else
 using WaveshareEsp32p4nanoBase = WifiBoard;
 #endif
@@ -87,15 +87,14 @@ public:
 class CustomBacklight : public Backlight {
 public:
     /** @brief 背光控制器, 复用外设 I2C 总线, 每次设置亮度时临时挂载从机. */
-    CustomBacklight(i2c_master_bus_handle_t i2c_handle)
-        : Backlight(), i2c_handle_(i2c_handle) {}
+    CustomBacklight(i2c_master_bus_handle_t i2c_handle) : Backlight(), i2c_handle_(i2c_handle) {}
 
 protected:
-    i2c_master_bus_handle_t i2c_handle_; // 复用的 I2C1 主机句柄(由 InitializePeripheralI2c 创建)
+    i2c_master_bus_handle_t i2c_handle_;  // 复用的 I2C1 主机句柄(由 InitializePeripheralI2c 创建)
 
     /** @brief 写背光芯片: 7位地址 0x45, 寄存器 0x96 后跟一字节亮度值. */
     virtual void SetBrightnessImpl(uint8_t brightness) override {
-        uint8_t i2c_address = 0x45;     // 7-bit address
+        uint8_t i2c_address = 0x45;  // 7-bit address
         uint8_t reg = 0x96;
         uint8_t data[2] = {reg, brightness};
 
@@ -127,9 +126,9 @@ class WaveshareEsp32p4nano : public WaveshareEsp32p4nanoBase {
 private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
-    LcdDisplay *display__;
+    LcdDisplay* display__;
     EspVideo* camera_ = nullptr;
-    CustomBacklight *backlight_;
+    CustomBacklight* backlight_;
 
     /** @brief 创建共享 I2C1 主机:外设与可选板载 ES8311 共用, 使能上拉. */
     void InitializePeripheralI2c() {
@@ -142,9 +141,10 @@ private:
             .glitch_ignore_cnt = 7,
             .intr_priority = 0,
             .trans_queue_depth = 0,
-            .flags = {
-                .enable_internal_pullup = 1,
-            },
+            .flags =
+                {
+                    .enable_internal_pullup = 1,
+                },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &codec_i2c_bus_));
     }
@@ -152,7 +152,8 @@ private:
     /** @brief 打开 MIPI-DSI PHY 的内部 LDO 供电, 使 PHY 从无电进入待机可初始化状态. */
     static esp_err_t bsp_enable_dsi_phy_power(void) {
 #if MIPI_DSI_PHY_PWR_LDO_CHAN > 0
-        // Turn on the power for MIPI DSI PHY, so it can go from "No Power" state to "Shutdown" state
+        // Turn on the power for MIPI DSI PHY, so it can go from "No Power" state to "Shutdown"
+        // state
         static esp_ldo_channel_handle_t phy_pwr_chan = NULL;
         esp_ldo_channel_config_t ldo_cfg = {
             .chan_id = MIPI_DSI_PHY_PWR_LDO_CHAN,
@@ -160,7 +161,7 @@ private:
         };
         esp_ldo_acquire_channel(&ldo_cfg, &phy_pwr_chan);
         ESP_LOGI(TAG, "MIPI DSI PHY Powered on");
-#endif // BSP_MIPI_DSI_PHY_PWR_LDO_CHAN > 0
+#endif  // BSP_MIPI_DSI_PHY_PWR_LDO_CHAN > 0
 
         return ESP_OK;
     }
@@ -174,10 +175,8 @@ private:
             .scl_speed_hz = 100000,
         };
         i2c_master_dev_handle_t dev_handle = NULL;
-        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK)
-        {
-            for (uint8_t i = 0; i < 4; i++)
-            {
+        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK) {
+            for (uint8_t i = 0; i < 4; i++) {
                 i2c_master_transmit(dev_handle, write_cmds[i], 2, 50);
             }
             i2c_master_bus_rm_device(dev_handle);
@@ -215,28 +214,31 @@ private:
             .out_color_format = LCD_COLOR_FMT_RGB565,
 #endif
             .num_fbs = 1,
-            .video_timing = {
-                .h_size = 480,
-                .v_size = 1920,
-                .hsync_pulse_width = 50,
-                .hsync_back_porch = 50,
-                .hsync_front_porch = 50,
-                .vsync_pulse_width = 20,
-                .vsync_back_porch = 20,
-                .vsync_front_porch = 20,
-            },
+            .video_timing =
+                {
+                    .h_size = 480,
+                    .v_size = 1920,
+                    .hsync_pulse_width = 50,
+                    .hsync_back_porch = 50,
+                    .hsync_front_porch = 50,
+                    .vsync_pulse_width = 20,
+                    .vsync_back_porch = 20,
+                    .vsync_front_porch = 20,
+                },
 #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
-            .flags = {
-                .use_dma2d = true,
-            },
+            .flags =
+                {
+                    .use_dma2d = true,
+                },
 #endif
         };
 
         ota7290b_vendor_config_t vendor_config = {
-            .mipi_config = {
-                .dsi_bus = mipi_dsi_bus,
-                .dpi_config = &dpi_config,
-            },
+            .mipi_config =
+                {
+                    .dsi_bus = mipi_dsi_bus,
+                    .dpi_config = &dpi_config,
+                },
         };
 
         esp_lcd_panel_dev_config_t lcd_dev_config = {};
@@ -247,9 +249,9 @@ private:
 
         esp_lcd_new_panel_ota7290b(io, &lcd_dev_config, &disp_panel);
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
-        //ESP_ERROR_CHECK(esp_lcd_dpi_panel_enable_dma2d(disp_panel));
+        // ESP_ERROR_CHECK(esp_lcd_dpi_panel_enable_dma2d(disp_panel));
 #endif
-        //esp_lcd_panel_reset(disp_panel);
+        // esp_lcd_panel_reset(disp_panel);
         esp_lcd_panel_init(disp_panel);
 
         display__ = new HerdsmanLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
@@ -258,8 +260,8 @@ private:
         backlight_ = new CustomBacklight(codec_i2c_bus_);
         backlight_->RestoreBrightness();
     }
- #elif LCD_TYPE == LCD_TYPE_JD9365
- void InitializeLCD() {
+#elif LCD_TYPE == LCD_TYPE_JD9365
+    void InitializeLCD() {
         uint8_t chip_addr = 0x45;
         uint8_t write_cmds[4][2] = {{0x95, 0x11}, {0x95, 0x17}, {0x96, 0x00}, {0x96, 0xFF}};
         i2c_device_config_t i2c_dev_conf = {
@@ -268,10 +270,8 @@ private:
             .scl_speed_hz = 100000,
         };
         i2c_master_dev_handle_t dev_handle = NULL;
-        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK)
-        {
-            for (uint8_t i = 0; i < 4; i++)
-            {
+        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK) {
+            for (uint8_t i = 0; i < 4; i++) {
                 i2c_master_transmit(dev_handle, write_cmds[i], 2, 50);
             }
             i2c_master_bus_rm_device(dev_handle);
@@ -300,35 +300,36 @@ private:
             .in_color_format = LCD_COLOR_FMT_RGB565,
             .out_color_format = LCD_COLOR_FMT_RGB565,
             .num_fbs = 1,
-            .video_timing = {
-                .h_size = 800,
-                .v_size = 1280,
-                .hsync_pulse_width = 20,
-                .hsync_back_porch = 20,
-                .hsync_front_porch = 40,
-                .vsync_pulse_width = 10,
-                .vsync_back_porch = 4,
-                .vsync_front_porch = 30,
-            },
+            .video_timing =
+                {
+                    .h_size = 800,
+                    .v_size = 1280,
+                    .hsync_pulse_width = 20,
+                    .hsync_back_porch = 20,
+                    .hsync_front_porch = 40,
+                    .vsync_pulse_width = 10,
+                    .vsync_back_porch = 4,
+                    .vsync_front_porch = 30,
+                },
         };
 
         jd9365_vendor_config_t vendor_config = {
             .init_cmds = lcd_init_cmds,
             .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
-            .mipi_config = {
-                .dsi_bus = mipi_dsi_bus,
-                .dpi_config = &dpi_config,
-                .lane_num = 2,
-            },
+            .mipi_config =
+                {
+                    .dsi_bus = mipi_dsi_bus,
+                    .dpi_config = &dpi_config,
+                    .lane_num = 2,
+                },
         };
-        
+
         esp_lcd_panel_dev_config_t lcd_dev_config = {};
         lcd_dev_config.reset_gpio_num = PIN_NUM_LCD_RST;
         lcd_dev_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         lcd_dev_config.bits_per_pixel = 16;
         lcd_dev_config.vendor_config = &vendor_config;
 
- 
         esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
         esp_lcd_panel_reset(disp_panel);
         esp_lcd_panel_init(disp_panel);
@@ -341,37 +342,36 @@ private:
     }
 #else
 #error "Unsupported LCD_TYPE"
-#endif   
+#endif
     /** @brief 初始化 GT911 触摸(I2C 地址 0x5D/0x14), 分辨率跟随 DISPLAY_W/H, 接入 LVGL. */
-    void InitializeTouch()
-    {
+    void InitializeTouch() {
         esp_lcd_touch_handle_t tp;
         esp_lcd_touch_config_t tp_cfg = {
             .x_max = DISPLAY_WIDTH,
             .y_max = DISPLAY_HEIGHT,
             .rst_gpio_num = GPIO_NUM_NC,
             .int_gpio_num = GPIO_NUM_NC,
-            .levels = {
-                .reset = 0,
-                .interrupt = 0,
-            },
-            .flags = {
-                .swap_xy = 0,
-                .mirror_x = 0,
-                .mirror_y = 0,
-            },
+            .levels =
+                {
+                    .reset = 0,
+                    .interrupt = 0,
+                },
+            .flags =
+                {
+                    .swap_xy = 0,
+                    .mirror_x = 0,
+                    .mirror_y = 0,
+                },
         };
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
         esp_lcd_panel_io_i2c_config_t tp_io_config = {
-            .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, 
+            .dev_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS,
             .control_phase_bytes = 1,
             .dc_bit_offset = 0,
-            .lcd_cmd_bits = 16,                            
-            .flags =
-            {
+            .lcd_cmd_bits = 16,
+            .flags = {
                 .disable_control_phase = 1,
-            }
-	    };
+            }};
         tp_io_config.scl_speed_hz = 100 * 1000;
         ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(codec_i2c_bus_, &tp_io_config, &tp_io_handle));
         ESP_LOGI(TAG, "Initialize touch controller");
@@ -386,44 +386,39 @@ private:
     /** @brief 初始化 OV5647 摄像头: CSI 接口, SCCB 复用外设 I2C, 复位/掉电脚悬空. */
     void InitializeCamera() {
         esp_video_init_csi_config_t base_csi_config = {
-            .sccb_config = {
-                .init_sccb = false,
-                .i2c_handle = codec_i2c_bus_,
-                .freq = 400000,
-            },
+            .sccb_config =
+                {
+                    .init_sccb = false,
+                    .i2c_handle = codec_i2c_bus_,
+                    .freq = 400000,
+                },
             .reset_pin = GPIO_NUM_NC,
-            .pwdn_pin  = GPIO_NUM_NC,
+            .pwdn_pin = GPIO_NUM_NC,
         };
 
         esp_video_init_config_t cam_config = {
-            .csi      = &base_csi_config,
+            .csi = &base_csi_config,
         };
 
         camera_ = new EspVideo(cam_config);
     }
-    /** @brief BOOT 键: 启动期短按进 WiFi 配网, 运行期短按切换对话; 以太网版仅切换对话. */
+    /** @brief BOOT 键: 启动期短按进 WiFi 配网, 运行期短按切换对话. */
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-#if CONFIG_XIAOZHI_NETWORK_ETHERNET
-            if (app.GetDeviceState() != kDeviceStateStarting) {
-                app.ToggleChatState();
-            }
-#else
-            // During startup (before connected), pressing BOOT button enters Wi-Fi config mode without reboot
+            // During startup (before connected), pressing BOOT button enters Wi-Fi config mode
+            // without reboot
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
                 return;
             }
             app.ToggleChatState();
-#endif
         });
     }
 
 public:
     /** @brief 整板上电装配顺序:I2C→LCD→触摸→摄像头→按键→Modbus(地址0x01)→MCP工具. */
-    WaveshareEsp32p4nano() :
-        boot_button_(BOOT_BUTTON_GPIO) {
+    WaveshareEsp32p4nano() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializePeripheralI2c();
         InitializeLCD();
         InitializeTouch();
@@ -454,20 +449,13 @@ public:
     }
 
     /** @brief 取牧场管理竖屏 UI 显示对象(HerdsmanLcdDisplay). */
-    virtual Display *GetDisplay() override {
-        return display__;
-    }
+    virtual Display* GetDisplay() override { return display__; }
 
     /** @brief 取 CSI 摄像头, 未初始化成功时为 nullptr. */
-    virtual Camera* GetCamera() override {
-        return camera_;
-    }
+    virtual Camera* GetCamera() override { return camera_; }
 
     /** @brief 取 I2C 背光控制器, 上层用于开关屏/恢复亮度. */
-    virtual Backlight *GetBacklight() override {
-         return backlight_;
-     }
-
+    virtual Backlight* GetBacklight() override { return backlight_; }
 };
 
 DECLARE_BOARD(WaveshareEsp32p4nano);

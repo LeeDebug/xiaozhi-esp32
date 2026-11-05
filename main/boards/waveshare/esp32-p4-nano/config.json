@@ -6,6 +6,7 @@
         {
             "name": "esp32-p4-nano-10.1-a",
             "sdkconfig_append": [
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
                 "CONFIG_UAC_FREQ_NUM_MAX=16",
                 "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
                 "CONFIG_CAMERA_OV5647=y",
@@ -25,6 +26,7 @@
             "name": "esp32-p4x-nano-10.1-a",
             "legacy_names": ["esp32-p4-nano-10.1-a-p4x"],
             "sdkconfig_append": [
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
                 "CONFIG_UAC_FREQ_NUM_MAX=16",
                 "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
                 "CONFIG_CAMERA_OV5647=y",
@@ -41,6 +43,7 @@
         {
             "name": "esp32-p4-nano-10.1-a-ap0316",
             "sdkconfig_append": [
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
                 "CONFIG_UAC_FREQ_NUM_MAX=16",
                 "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
                 "CONFIG_CAMERA_OV5647=y",
@@ -59,6 +62,7 @@
         {
             "name": "esp32-p4x-nano-10.1-a-ap0316",
             "sdkconfig_append": [
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
                 "CONFIG_UAC_FREQ_NUM_MAX=16",
                 "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
                 "CONFIG_CAMERA_OV5647=y",

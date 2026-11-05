@@ -1,5 +1,27 @@
 # Waveshare ESP32-P4-NANO
 
+## Ethernet and Wi-Fi
+
+Release variants default to `CONFIG_XIAOZHI_NETWORK_ETHERNET=y`, which enables
+Ethernet priority with Wi-Fi backup. The network worker allows Ethernet 10 seconds
+from network startup to establish a link **and obtain an IPv4 address**. Saved
+Wi-Fi credentials are tried in parallel. After the Ethernet deadline, Wi-Fi is
+used if Ethernet is unavailable; missing credentials enter provisioning immediately,
+and an unsuccessful primary Wi-Fi connection enters provisioning after 60 seconds.
+A failed backup Wi-Fi connection does not interrupt working Ethernet.
+
+Ethernet is selected as the default route whenever ready, including after recovery.
+Wi-Fi stays connected as backup. A route change reports a disconnect/reconnect so
+an active conversation can close its old connection; existing TCP sessions are not
+migrated between interfaces. A provisioning portal remains open until credentials
+are submitted, even if Ethernet becomes ready meanwhile. BOOT during startup also
+opens provisioning. The existing Wi-Fi-only menuconfig option remains available.
+
+Hardware validation: boot with/without cable, link without DHCP, saved valid/invalid
+Wi-Fi credentials, empty credentials, Wi-Fi timeout and portal submission, unplug
+and replug Ethernet with Wi-Fi connected, and interrupt backup Wi-Fi while Ethernet
+is active. Check default route, DHCP/DNS and reconnect for both WebSocket and MQTT/UDP.
+
 ## Audio device selection
 
 Set `AUDIO_DEVICE` directly in this board's `config.h` before building:

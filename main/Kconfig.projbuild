@@ -620,7 +620,7 @@ config UAC_FREQ_NUM_MAX
 choice XIAOZHI_NETWORK_TYPE
     prompt "Network Type"
     depends on BOARD_TYPE_WAVESHARE_ESP32_P4_NANO
-    default XIAOZHI_NETWORK_WIFI
+    default XIAOZHI_NETWORK_ETHERNET
     help
         Select the network connection used by this board.
 
@@ -628,11 +628,12 @@ choice XIAOZHI_NETWORK_TYPE
         bool "WiFi"
 
     config XIAOZHI_NETWORK_ETHERNET
-        bool "Ethernet"
+        bool "Ethernet with WiFi fallback"
         select ETH_ENABLED
         select ETH_USE_ESP32_EMAC
         help
-            Use the onboard Ethernet port for network access.
+            Prefer onboard Ethernet, falling back to WiFi after 10 seconds.
+            Keep configured WiFi connected as a backup.
 endchoice
 
 menu "Ethernet Configuration"
