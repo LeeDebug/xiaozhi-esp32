@@ -274,9 +274,6 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     }
 
     ESP_LOGI(TAG, "Writing to partition %s at offset 0x%lx", update_partition->label, update_partition->address);
-    bool image_header_checked = false;
-    std::string image_header;
-
     auto network = Board::GetInstance().GetNetwork();
     auto http = network->CreateHttp(0);
     if (!http->Open("GET", firmware_url)) {
@@ -295,6 +292,83 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         return false;
     }
 
+#ifdef CONFIG_OTA_STAGE_IN_PSRAM
+    constexpr size_t STAGING_SIZE = 5 * 1024 * 1024;
+    constexpr size_t PAGE_SIZE = 4096;
+    if (content_length > STAGING_SIZE || content_length > update_partition->size) {
+        ESP_LOGE(TAG, "Firmware size %u exceeds staging buffer or OTA partition",
+                 (unsigned)content_length);
+        return false;
+    }
+    std::unique_ptr<uint8_t, decltype(&heap_caps_free)> image(
+        (uint8_t*)heap_caps_malloc(STAGING_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+        heap_caps_free);
+    std::unique_ptr<uint8_t, decltype(&heap_caps_free)> page(
+        (uint8_t*)heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+        heap_caps_free);
+    if (!image || !page) {
+        ESP_LOGE(TAG, "OTA staging allocation failed: largest PSRAM block %u",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        return false;
+    }
+
+    size_t downloaded = 0, recent_read = 0;
+    auto last_calc_time = esp_timer_get_time();
+    while (downloaded < content_length) {
+        size_t request = std::min(PAGE_SIZE, content_length - downloaded);
+        int ret = http->Read((char*)page.get(), request);
+        if (ret <= 0) {
+            ESP_LOGE(TAG, "Incomplete OTA download at %u/%u, read=%d", (unsigned)downloaded,
+                     (unsigned)content_length, ret);
+            return false;
+        }
+        memcpy(image.get() + downloaded, page.get(), ret);
+        downloaded += ret;
+        recent_read += ret;
+        if (esp_timer_get_time() - last_calc_time >= 1000000 || downloaded == content_length) {
+            int progress = (int)(downloaded * 100 / content_length);
+            ESP_LOGI(TAG, "Download: %d%% (%u/%u)", progress, (unsigned)downloaded,
+                     (unsigned)content_length);
+            if (callback)
+                callback(progress, recent_read);
+            recent_read = 0;
+            last_calc_time = esp_timer_get_time();
+        }
+    }
+    http->Close();
+    if (content_length < sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) +
+                             sizeof(esp_app_desc_t) ||
+        image.get()[0] != ESP_IMAGE_HEADER_MAGIC) {
+        ESP_LOGE(TAG, "Invalid OTA image header");
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Download complete; writing %u bytes to flash", (unsigned)content_length);
+    if (callback) {
+        callback(kReadyToWrite, 0);
+    }
+    esp_err_t begin_err =
+        esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
+    if (begin_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to begin OTA: %s", esp_err_to_name(begin_err));
+        return false;
+    }
+    for (size_t offset = 0; offset < content_length; offset += PAGE_SIZE) {
+        size_t count = std::min(PAGE_SIZE, content_length - offset);
+        memcpy(page.get(), image.get() + offset, count);
+        esp_err_t write_err = esp_ota_write(update_handle, page.get(), count);
+        if (write_err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA write failed at %u: %s", (unsigned)offset,
+                     esp_err_to_name(write_err));
+            esp_ota_abort(update_handle);
+            return false;
+        }
+    }
+    image.reset();
+    page.reset();
+#else
+    bool image_header_checked = false;
+    std::string image_header;
     constexpr size_t PAGE_SIZE = 4096;
     char* buffer = (char*)heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_INTERNAL);
     if (buffer == nullptr) {
@@ -319,7 +393,8 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         buffer_offset += ret;
         if (esp_timer_get_time() - last_calc_time >= 1000000 || ret == 0) {
             size_t progress = total_read * 100 / content_length;
-            ESP_LOGI(TAG, "Progress: %u%% (%u/%u), Speed: %uB/s", progress, total_read, content_length, recent_read);
+            ESP_LOGI(TAG, "Progress: %u%% (%u/%u), Speed: %uB/s", progress, total_read,
+                     content_length, recent_read);
             if (callback) {
                 callback(progress, recent_read);
             }
@@ -329,9 +404,14 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
 
         if (!image_header_checked) {
             image_header.append(buffer, buffer_offset);
-            if (image_header.size() >= sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
+            if (image_header.size() >= sizeof(esp_image_header_t) +
+                                           sizeof(esp_image_segment_header_t) +
+                                           sizeof(esp_app_desc_t)) {
                 esp_app_desc_t new_app_info;
-                memcpy(&new_app_info, image_header.data() + sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t), sizeof(esp_app_desc_t));
+                memcpy(&new_app_info,
+                       image_header.data() + sizeof(esp_image_header_t) +
+                           sizeof(esp_image_segment_header_t),
+                       sizeof(esp_app_desc_t));
 
                 if (esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle)) {
                     esp_ota_abort(update_handle);
@@ -365,6 +445,8 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     }
     http->Close();
     heap_caps_free(buffer);
+
+#endif
 
     esp_err_t err = esp_ota_end(update_handle);
     if (err != ESP_OK) {

@@ -291,3 +291,20 @@ Hardware checks: logo transparency, ruler alignment on both LCD sizes, settings
 and chat touch targets, listening response, doubled excursion, minimum bars while speaking or idle,
 silence decay, interruption,
 and reconnection. A build alone does not validate those behaviors.
+
+## P4X OTA staging
+
+The `esp32-p4x-nano-10.1-a` variant downloads the complete image to a 5 MiB
+PSRAM buffer before starting flash writes. An internal 4 KiB buffer is used for
+network reads and flash writes. A missing/oversized HTTP body, incomplete download,
+invalid image header, or failed allocation aborts without erasing the OTA partition.
+The variant keeps PSRAM XiP disabled and FreeRTOS in IRAM; OTA previously worked
+with that combination, although the display flickered while flash was written.
+The download phase reports 0-100% in the status bar. After the full image is
+received, the UI shows “正在写入，完成后将自动重启”, waits 1.5 seconds,
+then fades the backlight off and waits 0.6 seconds before the first flash write.
+If writing fails, the previous brightness is restored. Staging separates download
+from flashing; the screen is deliberately dark during flash writes because display
+refresh can flicker while flash is busy.
+A contiguous 5 MiB free PSRAM block is required. Validate on hardware with Ethernet
+and Wi-Fi, interrupted downloads, OTA boot, display, and audio.

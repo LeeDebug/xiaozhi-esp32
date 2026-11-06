@@ -1252,13 +1252,29 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
     audio_service_.Stop();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    bool upgrade_success = Ota::Upgrade(upgrade_url, [this, display](int progress, size_t speed) {
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-        Schedule([display, message = std::string(buffer)]() {
-            display->SetChatMessage("system", message.c_str());
+    auto* backlight = board.GetBacklight();
+    const uint8_t previous_brightness = backlight ? backlight->brightness() : 0;
+    bool backlight_off_for_upgrade = false;
+    bool upgrade_success = Ota::Upgrade(
+        upgrade_url, [display, backlight, &backlight_off_for_upgrade](int progress, size_t speed) {
+            if (progress == Ota::kReadyToWrite) {
+                display->SetChatMessage("system", "正在写入，完成后将自动重启");
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                if (backlight != nullptr) {
+                    backlight->SetBrightness(0);
+                    vTaskDelay(pdMS_TO_TICKS(600));
+                    backlight_off_for_upgrade = true;
+                }
+                return;
+            }
+            char buffer[48];
+            snprintf(buffer, sizeof(buffer), "下载进度 %d%%  %uKB/s", progress,
+                     static_cast<unsigned>(speed / 1024));
+            display->SetStatus(buffer);
         });
-    });
+    if (!upgrade_success && backlight_off_for_upgrade) {
+        backlight->SetBrightness(previous_brightness);
+    }
 
     if (!upgrade_success) {
         // Upgrade failed, restart audio service and continue running

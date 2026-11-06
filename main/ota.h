@@ -9,6 +9,9 @@
 
 class Ota {
 public:
+    static constexpr int kReadyToWrite =
+        -1;  // Staged download complete; caller may prepare the UI.
+
     Ota();
     ~Ota();
 

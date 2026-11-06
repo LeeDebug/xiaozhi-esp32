@@ -6,6 +6,14 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config OTA_STAGE_IN_PSRAM
+    bool "Download OTA image to a 5 MiB PSRAM buffer before writing flash"
+    depends on SPIRAM
+    default n
+    help
+        Download and verify the complete HTTP body in PSRAM before starting
+        OTA writes. Requires a free contiguous 5 MiB external RAM block.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
