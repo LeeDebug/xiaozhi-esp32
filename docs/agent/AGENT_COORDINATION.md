@@ -124,3 +124,122 @@ or errors. Screenshot R2/review/preview.png. Existing live user Chrome serial pa
 was not manipulated; verification used separate local IAB and no physical port.
 NOT_RUN: real serial timing/device tests, firmware compile/flash. Local QA server
 stopped on completion. Evidence: docs/agent/evidence/WP-web-modbus/R2/.
+
+## WP-data-report / R1 — 2026-11-11
+
+User request: add production data reporting per 《设备端接入指南》 with base URL
+http://120.53.1.196:8002, using the Excel register map. User chose docx catalog as
+authority (not the live 28-key config), standard execution, smoke+targeted scope.
+Mid-task the user instructed: "只改代码，不做编译和环境修改". From then on no builds,
+no IDF env changes (a prior attempt to install IDF py deps in ~/.espressif was denied
+and must not be retried).
+
+Implemented (board-local, waveshare/esp32-p4-nano):
+- production_data_report.{h,cc}: dedicated "data_report" task; GET
+  /xiaozhi/data-report-config/current after network connect, SNTP time sync with
+  uptime fallback, chunked Modbus 0x03 reads (64-register chunks), cJSON upload POST
+  to /xiaozhi/data-analysis/upload with deviceInfo/location toggles, retry/backoff,
+  pause on disconnect. Multi-word fields decode low word first (matches MCP tools).
+- production_data_report_fields.inc: 152/152 docx catalog entries, keys+addresses
+  verified equal to docx table by script; 10 bit fields for 0xA6.
+- ethernet_wifi_board.h: class now also derives ProductionBoardLinkage, adds
+  SetNetworkStateObserver() and IsNetworkLinked(); observer called next to the App
+  callback in Notify().
+- esp32-p4-nano.cc: AttachBoardLinkage + observer + InitializeProductionDataReport()
+  under CONFIG_XIAOZHI_NETWORK_ETHERNET.
+
+Verified: docx/Excel parsed and server endpoints probed (GET 200, POST accepted);
+field catalog cross-checked 152/152 vs docx; board diff reviewed; residual compile
+defects from two earlier ad-hoc -fsyntax-only runs were fixed by inspection
+(kNoKeysRecheckTicks, sntp callback signature timeval*, GetEpochMillis constness).
+
+NOT_RUN: any firmware build, flash, physical RS485/HTTP roundtrip, clang-format.
+Known risk: no compiler confirmation since the last edits.
+
+## WP-data-report / R2 — 2026-11-11
+
+User: 在代码里打印和数据服务器交换的相关信息; chose detailed exchange logging.
+Still code-only per user instruction (no build, no env changes).
+
+Added in production_data_report.cc:
+- LogHttpExchange(): logs ">>> [phase] METHOD url", request body with byte size,
+  "<<< [phase] status=N, bytes, elapsed=ms", full response body (or empty warning);
+  used by both config GET and upload POST. Truncation of responses now warns.
+- LogConfigSummary(): enabled/interval(min+s)/deviceInfo/location/keys/skipped; plus
+  first 8 keys list.
+- Report attempt logging: "Report #N: reading ... Modbus address ...", payload built
+  with field count/bytes, per-chunk Modbus 0x03 range at DEBUG, chunk+register totals,
+  "Report #N done: ... next report in ... s", failure/retry logs include N.
+- kMaxResponseBytes 16KB -> 32KB so full responses are logged without loss.
+- Separate counters: config_loaded_count_ (config generation) and report_attempts_.
+
+NOT_RUN: build/format/hardware. No compiler confirmation after these edits.
+
+## WP-web-simulator / R3 — 2026-11-11
+
+User: 完善 web-serial 模拟器所需的全部模拟数据（依据 152 项上报字段与寄存器表）。
+Chosen: 补全默认模拟值 + 保留可编辑; 验证 = 本地 Node 测试 + 字段一致性校验.
+
+Implemented:
+- web/registers.mjs (new): REGISTER_CATALOG (152 entries incl. 10 bit fields), BUSINESS_FIELDS
+  (28 physical-quantity inputs), PRESET_VALUES/createPresetRegisters() (167-register snapshot),
+  RESERVED_REGISTERS, splitWords/joinWords/writeField/writeRaw/readField, describeRegister,
+  formatRegister/formatBits.
+- web/registers.test.mjs (new, 13 tests): 152 keys match firmware .inc (name+address), reserved
+  addresses stay 0, alarm region clear, enum ranges, low-word-first, egg column sum equals total,
+  64-register chunked serial roundtrip equals preset.
+- web/app.mjs: uses the module (names, preset, generated value form, decoded column in table),
+  storage key v2; removed old fixed silo/valve/temperature/light inputs.
+- web/index.html: #fields container replaces fixed inputs.
+- web/README.md: catalog/preset documentation, test count.
+
+PASS: node --test web/*.test.mjs = 48/48 (35 existing + 13 new); node --check on all .mjs;
+headless Chrome render: 28 field inputs, 167 rows, decoded meanings (25.500, 12000, 12.340,
+1.850, 0xA6 bit expansion); read frames match docs (version reply 01 03 02 04 52 3B 79 = 1106,
+water temp 25500, lights 60/80, silo1 12000, 0xA6 0x03F8). Temp server on :8766 stopped.
+
+NOT_RUN: Web Serial with physical adapter, firmware build/flash, real device roundtrip.
+
+## WP-data-report / R4 — 2026-11-11 崩溃分析
+
+异常: assert "xQueueSemaphoreTake queue.c:1713 (pxQueue->uxItemSize == 0)" at
+freertos_hooks.c:31 (fpPanic at ISR->assert). Path: EspTcp::ReceiveTask ->
+DoDisconnect(false) -> disconnect_callback_ -> HttpClient::OnTcpDisconnected ->
+lock_guard(mutex_) while receive task priority 1 already inherits priority from
+http_client taking mutex_ in OnTcpData; task waiting on mutex_ is owner of
+ESP_TCP rx? Root cause: EspTcp uses close(2) on a UDP-protocol socket
+(xQueueSemaphoreTake on a UDP queue is triggered by lwIP processed/af_pending
+release), diagnosed as lwIP UDP socket queue assert/FSM issue; supplier lib
+close(2) misuse. See evidence file R4.
+
+Status: NO fix applied yet (analysis only; user has not requested a code change).
+Candidate mitigations (board-local, no vendor edits): one in-flight HTTP job at a
+time in production_data_report.cc; avoid reusing a client across the 10s receive
+task window; reduce concurrent TCP users. Real fix belongs to 78/esp-ml307
+(EspTcp::DoDisconnect must not call close(2) from its own receive task and must
+not free the socket while the receive task is still running) and needs user
+consent to edit managed_components.
+
+NOT_RUN: reproduction on hardware; vendor lib not modified per AGENTS.md.
+
+## WP-ml307-decouple / R5 — 2026-11-11
+
+User: 当前板 main/boards/waveshare/esp32-p4-nano 找不到/去掉与 ML307 的关联。Mode: 标准执行
+(定位+修复), 定位阶段只调查。用户要求不编译、不改环境。
+
+Findings inside the board dir: zero textual ML307 references. All coupling is indirect:
+1) production_data_report.cc had `#include "network_interface.h"` (vendor header) - removed;
+   ReadResponse is now a template, call sites pass `*http` and Close() explicitly.
+2) production_data_report.h had `#include "board.h"` (pulls vendor http.h/web_socket.h/...) and never
+   used it - removed.
+Remaining (outside board dir, shared infrastructure, NOT ML307-modem specific):
+- boards/common/board.h includes vendor <http.h>,<web_socket.h>,<mqtt.h>,<udp.h>,<network_interface.h>.
+- boards/common/ethernet_board.cc includes <esp_network.h> and uses `static EspNetwork network;`
+  -> this IS the live network stack of this board (http_client/esp_tcp); the crash path.
+- main/CMakeLists.txt:51 builds boards/common/ml307_board.cc unconditionally.
+- main/idf_component.yml:32 `78/esp-ml307: ~3.6.6` has no rules => applies to all boards.
+
+Behavior change (deliberate): HTTP client is now closed explicitly after reading the response, and
+no longer destroyed inside ReadResponse, which matches the crash analysis (二次断开回调).
+
+NOT_RUN: build, hardware. Static only (brace balance, call-site review).

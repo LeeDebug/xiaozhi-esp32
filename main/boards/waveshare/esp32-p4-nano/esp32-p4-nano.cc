@@ -31,6 +31,7 @@
 #include "herdsman_lcd_display.h"
 // #include "display/no_display.h"
 #include "button.h"
+#include "production_data_report.h"
 #include "production_mcp_tools.h"
 #include "production_modbus.h"
 
@@ -431,6 +432,19 @@ public:
         }
         ProductionModbus::GetInstance().SetDeviceAddress(0x01);
         InitializeProductionMcpTools();
+#if CONFIG_XIAOZHI_NETWORK_ETHERNET
+        // 数据上报: 网络连接后先拉取上报配置, 再按配置周期读 Modbus 并 POST 上报.
+        ProductionDataReport::GetInstance().AttachBoardLinkage(this);
+        SetNetworkStateObserver([](NetworkEvent event) {
+            if (event == NetworkEvent::Connected) {
+                ProductionDataReport::GetInstance().NotifyNetworkConnected();
+            } else if (event == NetworkEvent::Disconnected ||
+                       event == NetworkEvent::WifiConfigModeEnter) {
+                ProductionDataReport::GetInstance().NotifyNetworkDisconnected();
+            }
+        });
+        InitializeProductionDataReport();
+#endif
     }
 
     /** @brief 按 config.h 选择音频编解码器(静态单例). */

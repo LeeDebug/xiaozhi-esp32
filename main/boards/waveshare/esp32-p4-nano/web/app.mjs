@@ -1,17 +1,21 @@
 import { ModbusSlave, RtuDecoder, withCrc, hex, parseHex } from './protocol.mjs';
 import { SerialSession } from './serial.mjs';
 import { GapFramer, defaultFrameGap } from './framing.mjs';
+import {
+  REGISTER_COUNT, BUSINESS_FIELDS, createPresetRegisters, readField, writeRaw,
+  describeRegister, formatRegister,
+} from './registers.mjs';
 
 const $ = id => document.getElementById(id);
 const slave = new ModbusSlave();
-const siloAddresses = [2, 14, 26, 38];
-const key = 'p4-nano-modbus-lab-v1';
-const names = new Map([[59, '灯光一 / %'], [60, '灯光二 / %'], [105, '保留'], [107, '主水阀'], [108, '水温 / × 0.001 °C']]);
-siloAddresses.forEach((a, i) => { names.set(a, `料塔 ${i + 1} 重量 · 低字`); names.set(a + 1, `料塔 ${i + 1} 重量 · 高字`); });
+const key = 'p4-nano-modbus-lab-v2';
+const names = new Map();
+for (let address = 0; address < REGISTER_COUNT; address++) names.set(address, describeRegister(address));
 let session = null, connecting = false, responseDelay = 0;
 let counts = { rx: 0, tx: 0, error: 0 };
 let logs = [];
 const rows = [];
+const meanings = [];
 
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 function integer(value, min, max) {
@@ -52,26 +56,19 @@ function loadSettings(data) {
   slave.registers.set(regs); slave.address = address; $('address').value = address;
 }
 function preset() {
-  slave.registers.fill(0);
-  slave.registers[107] = 2; slave.registers[108] = 25500;
-  slave.registers[59] = 60; slave.registers[60] = 80;
-  siloAddresses.forEach((a, i) => setWeight(a, [12000, 8500, 6400, 15600][i]));
-}
-function setWeight(address, value) {
-  slave.registers[address] = value & 0xffff;
-  slave.registers[address + 1] = (value >>> 16) & 0xffff;
+  // 完整的产线示例快照(152 个上报字段全部有值), 见 registers.mjs 的 createPresetRegisters().
+  slave.registers.set(createPresetRegisters());
 }
 function sync(changed = []) {
   // Keep the authoritative register bank visible after either serial or local writes.
-  const v = slave.registers[107];
-  const custom = $('valve').querySelector('[data-custom]'); custom?.remove();
-  if (v > 2) { const option = new Option(`${v} · 未知状态`, String(v)); option.dataset.custom = 'true'; $('valve').add(option); }
-  $('valve').value = v;
-  $('temperature').value = (slave.registers[108] / 1000).toFixed(3);
-  $('light1').value = slave.registers[59]; $('light2').value = slave.registers[60];
-  siloAddresses.forEach((a, i) => { $(`silo${i}`).value = (slave.registers[a + 1] << 16) | slave.registers[a]; });
+  for (const field of BUSINESS_FIELDS) {
+    const input = $(`field-${field.id}`);
+    if (input) input.value = readField(slave.registers, field.id);
+  }
   rows.forEach(({ tr, input, raw }, address) => {
     input.value = slave.registers[address]; raw.textContent = `0x${slave.registers[address].toString(16).toUpperCase().padStart(4, '0')}`;
+    const meaning = formatRegister(address, slave.registers);
+    if (meanings[address]) meanings[address].textContent = meaning ? `= ${meaning}` : '';
     tr.classList.toggle('changed', changed.includes(address));
   });
 }
@@ -141,34 +138,47 @@ $('frame-gap').onchange = () => {
 $('address').onchange = () => { try { slave.address = integer($('address').value, 1, 247); persist(); } catch (e) { notice(e.message, true); $('address').value = slave.address; } };
 $('delay').onchange = () => { try { responseDelay = integer($('delay').value, 0, 3000); } catch (e) { $('delay').value = responseDelay; notice(e.message, true); } };
 
-siloAddresses.forEach((address, i) => {
-  const label = document.createElement('label'); label.textContent = `料塔 ${i + 1} / kg`;
-  const small = document.createElement('small'); small.textContent = `0x${address.toString(16).toUpperCase().padStart(2, '0')} / 0x${(address + 1).toString(16).toUpperCase().padStart(2, '0')} · int32`;
-  const input = document.createElement('input'); Object.assign(input, { id: `silo${i}`, type: 'number', min: '-2147483648', max: '2147483647', required: true });
-  label.append(small, input); $('silos').append(label);
-});
+// 业务字段按寄存器目录自动生成: 每个可读字段一个输入框, 提交后直接写共享寄存器.
+for (const field of BUSINESS_FIELDS) {
+  const label = document.createElement('label');
+  label.textContent = field.name;
+  const hexAddr = `0x${field.addr.toString(16).toUpperCase().padStart(2, '0')}`;
+  const small = document.createElement('small');
+  small.textContent = field.type === 's32' || field.type === 'u32'
+    ? `${hexAddr} / 0x${(field.addr + 1).toString(16).toUpperCase().padStart(2, '0')} · ${field.type}`
+    : `${hexAddr}${field.scale && field.scale !== 1 ? ` × ${field.scale}` : ''} · ${field.type}`;
+  const input = document.createElement('input');
+  const range = field.view === 'percent' ? { min: '0', max: '100', step: '1' }
+    : field.view === 'valve' ? { min: '0', max: '2', step: '1' }
+      : field.type === 's32' ? { min: '-2147483648', max: '2147483647', step: '1' }
+        : { min: '0', max: '65535', step: field.scale && field.scale !== 1 ? String(field.scale) : '1' };
+  Object.assign(input, { id: `field-${field.id}`, type: 'number', required: true, ...range });
+  input.dataset.field = field.id;
+  label.append(small, input); $('fields').append(label);
+}
 $('values').onsubmit = event => event.preventDefault();
 $('values').onchange = event => {
   const input = event.target;
+  const fieldId = input.dataset?.field;
+  if (!fieldId) return;
+  const field = BUSINESS_FIELDS.find(item => item.id === fieldId);
   try {
-    let changed;
-    if (input.id.startsWith('silo')) {
-      const a = siloAddresses[Number(input.id.slice(4))]; setWeight(a, integer(input.value, -2147483648, 2147483647)); changed = [a, a + 1];
-    } else {
-      const a = { valve: 107, temperature: 108, light1: 59, light2: 60 }[input.id];
-      if (a === undefined) return;
-      if (!input.checkValidity()) throw new Error('数值超出范围或精度不正确');
-      slave.registers[a] = input.id === 'temperature' ? Math.round(Number(input.value) * 1000) : integer(input.value, 0, input.id === 'valve' ? 2 : 100);
-      changed = [a];
-    }
+    if (!input.checkValidity()) throw new Error('数值超出范围或精度不正确');
+    // 输入框里是物理量(如 25.500 °C), 按倍率换算回原始寄存器值.
+    const raw = field.scale && field.scale !== 1
+      ? integer(Math.round(Number(input.value) / field.scale), 0, Number(input.max))
+      : integer(input.value, Number(input.min), Number(input.max));
+    const changed = writeRaw(slave.registers, field.type, field.addr, raw);
     sync(changed); persist();
   } catch (error) { notice(error.message, true); sync(); }
 };
-for (let address = 0; address < 167; address++) {
+for (let address = 0; address < REGISTER_COUNT; address++) {
   const tr = document.createElement('tr');
   const cell = text => { const td = document.createElement('td'); td.textContent = text; tr.append(td); return td; };
   cell(`${address} / 0x${address.toString(16).toUpperCase().padStart(2, '0')}`);
   cell(names.get(address) || '通用保持寄存器');
+  const meaning = document.createElement('small'); meaning.className = 'decoded';
+  meanings.push(meaning); tr.lastElementChild.append(meaning);
   const input = document.createElement('input'); Object.assign(input, { type: 'number', min: '0', max: '65535', step: '1' }); input.setAttribute('aria-label', `寄存器 ${address} 原始值`);
   input.onchange = () => { try { slave.registers[address] = integer(input.value, 0, 65535); sync([address]); persist(); } catch (e) { notice(e.message, true); sync(); } };
   cell('').append(input); const raw = cell(''); $('registers').append(tr); rows.push({ tr, input, raw });

@@ -16,23 +16,29 @@
 #include "audio_codec.h"
 #include "display.h"
 #include "ethernet_board.h"
+#include "production_data_report.h"
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
 #include "blufi.h"
 #endif
 
 // This board's network policy is owned by one worker. Driver callbacks only publish
 // readiness; application state changes are dispatched to the application task.
-class EthernetWifiBoard : public EthernetBoard {
+class EthernetWifiBoard : public EthernetBoard, public ProductionBoardLinkage {
     enum class Uplink { None, Ethernet, Wifi };
     std::atomic<bool> ethernet_ready_{false};
     std::atomic<bool> config_requested_{false};
     std::atomic<Uplink> uplink_{Uplink::None};
     TaskHandle_t network_task_ = nullptr;
+    // 板级网络观察者(如数据上报), 与 App 的 network_event_callback_ 并行调用.
+    std::function<void(NetworkEvent)> network_observer_;
 
     void Notify(NetworkEvent event, const std::string& data = "") {
         Application::GetInstance().Schedule([this, event, data]() {
             if (network_event_callback_) {
                 network_event_callback_(event, data);
+            }
+            if (network_observer_) {
+                network_observer_(event);
             }
         });
     }
@@ -180,6 +186,14 @@ protected:
     }
 
 public:
+    // 网络观察者在 App 主任务中回调, 不能调用 ShowNotification 等重入 UI 的接口.
+    void SetNetworkStateObserver(std::function<void(NetworkEvent)> observer) {
+        network_observer_ = std::move(observer);
+    }
+
+    // 当前是否已与网络连接(数据上报用).
+    bool IsNetworkLinked() const override { return uplink_.load() != Uplink::None; }
+
     void StartNetwork() override {
         if (network_task_) {
             return;
