@@ -197,6 +197,26 @@ Only TX and RX are configured. The external RS485 transceiver must provide autom
 
 ## Display Page
 
+### MIPI panel selection (LCD_TYPE)
+
+Three MIPI-DSI panels are supported on this board. Select one by editing
+`LCD_TYPE` in this board's `config.h` and rebuilding. This is a build-time
+source macro, not a Kconfig option; the resolution, timings, init commands and
+reset pin follow automatically.
+
+| `LCD_TYPE` | Panel | Resolution | Driver component | Reset pin | Init commands |
+| --- | --- | --- | --- | --- | --- |
+| `LCD_TYPE_ILI9881C` (2, default) | 7" | 720 x 1280 | `espressif/esp_lcd_ili9881c` | GPIO27 | `lcd_init_cmds.h` (ILI9881C table) |
+| `LCD_TYPE_OTA7290B` (0) | 8.8" vertical bar | 480 x 1920 | `waveshare/esp_lcd_ota7290b` | none (power-on sequence) | built into driver |
+| `LCD_TYPE_JD9365` (1) | 10.1" | 800 x 1280 | `espressif/esp_lcd_jd9365` | none (power-on sequence) | `lcd_init_cmds.h` (JD9365 table) |
+
+All three use RGB565 (16bpp) and 2 MIPI-DSI data lanes. The default is the
+7" ILI9881C, whose settings (1000 Mbps lane rate, 80 MHz DPI, timing 50/239/33
+and 30/20/2) match the Waveshare ESP32-P4-WiFi6-Touch-LCD 7" panel. Verify the
+actual wiring for this panel: hardware reset on GPIO27, the I2C backlight chip
+at 0x45 (shared with the other panels), GT911 touch on the shared I2C bus, and
+the board's 0x45 power-enable sequence. A successful build does not validate
+the panel; check brightness, touch, orientation and resolution on real hardware.
 
 ### Recommended display screen
 

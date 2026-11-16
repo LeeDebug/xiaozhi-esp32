@@ -6,8 +6,9 @@
  * - 音频: AUDIO_DEVICE 三选一, AP0316_INPUT_RIGHT_SLOT 选择 AP 输入时隙.
  * - 按键: BOOT_BUTTON_GPIO 为配网/对话复用键(见 esp32-p4-nano.cc InitializeButtons).
  * - 产线: PRODUCTION_MODBUS_* 为 UART1 的端口与 TX/RX 引脚, 波特率等见 production_modbus.cc.
- * - 屏幕: LCD_TYPE 二选一 —— OTA7290B(8.8寸 480x1920) / JD9365(10.1寸 800x1280),
- *   均为 16bpp RGB565 + 2-lane MIPI-DSI; DISPLAY_* 控制 LVGL 旋转/镜像/偏移.
+ * - 屏幕: LCD_TYPE 三选一 —— OTA7290B(8.8寸 480x1920) / JD9365(10.1寸 800x1280) /
+ *   ILI9881C(7寸 720x1280); 均为 16bpp RGB565 + 2-lane MIPI-DSI;
+ *   DISPLAY_* 控制 LVGL 旋转/镜像/偏移.
  * - UI: HERDSMAN_UI_SHOW_* 裁剪左右栏给聊天区让位; HERDSMAN_UI_THEME 三选一色板(默认 DARK).
  */
 #ifndef _BOARD_CONFIG_H_
@@ -93,27 +94,38 @@
 #define PRODUCTION_MODBUS_UART_TX_PIN GPIO_NUM_20 // RS485 DI
 #define PRODUCTION_MODBUS_UART_RX_PIN GPIO_NUM_21 // RS485 RO
 
-/* ===== LCD 面板型号枚举: 0=8.8寸 OTA7290B, 1=10.1寸 JD9365 ===== */
+/* ===== LCD 面板型号枚举: 0=8.8寸 OTA7290B, 1=10.1寸 JD9365, 2=7寸 ILI9881C ===== */
 #define LCD_TYPE_OTA7290B (0)
 #define LCD_TYPE_JD9365 (1)
+#define LCD_TYPE_ILI9881C (2)
 
 // 8.8 inch LCD --> LCD_TYPE_OTA7290B
 // 10.1 inch LCD --> LCD_TYPE_JD9365
-#define LCD_TYPE LCD_TYPE_OTA7290B // 当前装配的面板, 切换后 DISPLAY_WIDTH/HEIGHT 自动跟随
+// 7 inch LCD   --> LCD_TYPE_ILI9881C
+#define LCD_TYPE LCD_TYPE_ILI9881C // 当前装配的面板(默认7寸), 切换后 DISPLAY_WIDTH/HEIGHT 自动跟随
 
-/* ===== 显示分辨率:随 LCD_TYPE 自动展开(O TA7290B 竖条屏 480x1920 / JD9365 800x1280) ===== */
+/* ===== 显示分辨率:随 LCD_TYPE 自动展开(OTA7290B 480x1920 / JD9365 800x1280 / ILI9881C 720x1280) ===== */
 #if LCD_TYPE == LCD_TYPE_OTA7290B
 #define DISPLAY_WIDTH 480   // OTA7290B 横向像素
 #define DISPLAY_HEIGHT 1920 // OTA7290B 纵向像素(竖屏长条)
 #elif LCD_TYPE == LCD_TYPE_JD9365
 #define DISPLAY_WIDTH 800   // JD9365 横向像素
 #define DISPLAY_HEIGHT 1280 // JD9365 纵向像素
+#elif LCD_TYPE == LCD_TYPE_ILI9881C
+#define DISPLAY_WIDTH 720   // ILI9881C 横向像素
+#define DISPLAY_HEIGHT 1280 // ILI9881C 纵向像素
 #else
 #error "Unsupported LCD_TYPE" // 防止误填, 编译期直接报错
 #endif
 
-#define LCD_BIT_PER_PIXEL          (16)        // RGB565, 与 DPI in/out color format 对应
-#define PIN_NUM_LCD_RST            GPIO_NUM_NC // 面板无独立复位脚, 靠上电时序复位
+#define LCD_BIT_PER_PIXEL (16) // RGB565, 与 DPI in/out color format 对应
+
+/* 复位脚: OTA7290B/JD9365 无独立复位脚(靠上电时序); ILI9881C 使用 GPIO27 硬件复位. */
+#if LCD_TYPE == LCD_TYPE_ILI9881C
+#define PIN_NUM_LCD_RST GPIO_NUM_27
+#else
+#define PIN_NUM_LCD_RST GPIO_NUM_NC
+#endif
 
 #define DELAY_TIME_MS                      (3000) // 通用延时基准(ms), 如亮屏/切屏等待
 #define LCD_MIPI_DSI_LANE_NUM          (2)    // MIPI-DSI 2 条数据 lane, 与 bus_config.num_data_lanes 一致

@@ -4,7 +4,8 @@
  *
  * 硬件链路一览:
  * - 音频: config.h 的 AUDIO_DEVICE 选择 USB UAC、板载 ES8311 或 AP-0316 输入 + ES8311 输出.
- * - 显示: MIPI-DSI 面板(OTA7290B 8.8寸 / JD9365 10.1寸二选一) + `HerdsmanLcdDisplay`.
+ * - 显示: MIPI-DSI 面板(OTA7290B 8.8寸 / JD9365 10.1寸 / ILI9881C 7寸三选一,
+ *   由 config.h 的 LCD_TYPE 决定) + `HerdsmanLcdDisplay`.
  * - 背光: `CustomBacklight` 经 I2C(0x45/0x96) 写亮度.
  * - 触摸: GT911 经同一 I2C 总线接入 LVGL.
  * - 摄像头: OV5647 经 CSI + 同一 I2C(SCCB) 初始化.
@@ -48,6 +49,9 @@
 #include <esp_lcd_ota7290b.h>
 #elif LCD_TYPE == LCD_TYPE_JD9365
 #include "esp_lcd_jd9365.h"
+#include "lcd_init_cmds.h"
+#elif LCD_TYPE == LCD_TYPE_ILI9881C
+#include "esp_lcd_ili9881c.h"
 #include "lcd_init_cmds.h"
 #else
 #error "Unsupported LCD_TYPE"
@@ -332,6 +336,97 @@ private:
         lcd_dev_config.vendor_config = &vendor_config;
 
         esp_lcd_new_panel_jd9365(io, &lcd_dev_config, &disp_panel);
+        esp_lcd_panel_reset(disp_panel);
+        esp_lcd_panel_init(disp_panel);
+
+        display__ = new HerdsmanLcdDisplay(io, disp_panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                           DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X,
+                                           DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        backlight_ = new CustomBacklight(codec_i2c_bus_);
+        backlight_->RestoreBrightness();
+    }
+#elif LCD_TYPE == LCD_TYPE_ILI9881C
+    void InitializeLCD() {
+        // Nano 板上电使能序列(电源芯片 0x45), 与 OTA7290B/JD9365 分支一致.
+        uint8_t chip_addr = 0x45;
+        uint8_t write_cmds[4][2] = {{0x95, 0x11}, {0x95, 0x17}, {0x96, 0x00}, {0x96, 0xFF}};
+        i2c_device_config_t i2c_dev_conf = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = chip_addr,
+            .scl_speed_hz = 100000,
+        };
+        i2c_master_dev_handle_t dev_handle = NULL;
+        if (i2c_master_bus_add_device(codec_i2c_bus_, &i2c_dev_conf, &dev_handle) == ESP_OK) {
+            for (uint8_t i = 0; i < 4; i++) {
+                i2c_master_transmit(dev_handle, write_cmds[i], 2, 50);
+            }
+            i2c_master_bus_rm_device(dev_handle);
+        }
+
+        bsp_enable_dsi_phy_power();
+        esp_lcd_panel_io_handle_t io = NULL;
+        esp_lcd_panel_handle_t disp_panel = NULL;
+
+        esp_lcd_dsi_bus_handle_t mipi_dsi_bus = NULL;
+        esp_lcd_dsi_bus_config_t bus_config = {
+            .bus_id = 0,
+            .num_data_lanes = LCD_MIPI_DSI_LANE_NUM,
+            .lane_bit_rate_mbps = 1000,
+        };
+        esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus);
+
+        ESP_LOGI(TAG, "Install MIPI DSI LCD control panel");
+        // ILI9881C 使用 8bit 命令/参数的 DBI 接口(与 wifi6-touch-lcd 板 LCD_7 分支一致).
+        esp_lcd_dbi_io_config_t dbi_config = {
+            .virtual_channel = 0,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+        };
+        esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io);
+
+        esp_lcd_dpi_panel_config_t dpi_config = {
+            .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+            .dpi_clock_freq_mhz = 80,
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+            .in_color_format = LCD_COLOR_FMT_RGB565,
+            .out_color_format = LCD_COLOR_FMT_RGB565,
+#else
+            .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
+            .in_color_format = LCD_COLOR_FMT_RGB565,
+            .out_color_format = LCD_COLOR_FMT_RGB565,
+#endif
+            .num_fbs = 1,
+            .video_timing =
+                {
+                    .h_size = DISPLAY_WIDTH,
+                    .v_size = DISPLAY_HEIGHT,
+                    .hsync_pulse_width = 50,
+                    .hsync_back_porch = 239,
+                    .hsync_front_porch = 33,
+                    .vsync_pulse_width = 30,
+                    .vsync_back_porch = 20,
+                    .vsync_front_porch = 2,
+                },
+        };
+
+        ili9881c_vendor_config_t vendor_config = {
+            .init_cmds = lcd_init_cmds,
+            .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
+            .mipi_config =
+                {
+                    .dsi_bus = mipi_dsi_bus,
+                    .dpi_config = &dpi_config,
+                    .lane_num = LCD_MIPI_DSI_LANE_NUM,
+                },
+        };
+
+        esp_lcd_panel_dev_config_t lcd_dev_config = {};
+        lcd_dev_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        lcd_dev_config.bits_per_pixel = LCD_BIT_PER_PIXEL;
+        lcd_dev_config.reset_gpio_num = PIN_NUM_LCD_RST;
+        lcd_dev_config.vendor_config = &vendor_config;
+
+        esp_lcd_new_panel_ili9881c(io, &lcd_dev_config, &disp_panel);
         esp_lcd_panel_reset(disp_panel);
         esp_lcd_panel_init(disp_panel);
 
