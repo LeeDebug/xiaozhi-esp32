@@ -6,9 +6,10 @@
  * - 音频: AUDIO_DEVICE 三选一, AP0316_INPUT_RIGHT_SLOT 选择 AP 输入时隙.
  * - 按键: BOOT_BUTTON_GPIO 为配网/对话复用键(见 esp32-p4-nano.cc InitializeButtons).
  * - 产线: PRODUCTION_MODBUS_* 为 UART1 的端口与 TX/RX 引脚, 波特率等见 production_modbus.cc.
- * - 屏幕: LCD_TYPE 三选一 —— OTA7290B(8.8寸 480x1920) / JD9365(10.1寸 800x1280) /
- *   ILI9881C(7寸 720x1280); 均为 16bpp RGB565 + 2-lane MIPI-DSI;
- *   DISPLAY_* 控制 LVGL 旋转/镜像/偏移.
+ * - 屏幕: LCD_TYPE 四选一 —— EK79007(7B寸 1024x600) / OTA7290B(8.8寸 480x1920) /
+ *   JD9365(10.1寸 800x1280) / ILI9881C(7寸 720x1280);
+ *   均为 16bpp RGB565 + 2-lane MIPI-DSI; DISPLAY_* 控制 LVGL 旋转/镜像/偏移.
+ *   EK79007 用 GPIO32 PWM 背光 + GPIO33 复位, 其余用 I2C 背光.
  * - UI: HERDSMAN_UI_SHOW_* 裁剪左右栏给聊天区让位; HERDSMAN_UI_THEME 三选一色板(默认 DARK).
  */
 #ifndef _BOARD_CONFIG_H_
@@ -94,17 +95,19 @@
 #define PRODUCTION_MODBUS_UART_TX_PIN GPIO_NUM_20 // RS485 DI
 #define PRODUCTION_MODBUS_UART_RX_PIN GPIO_NUM_21 // RS485 RO
 
-/* ===== LCD 面板型号枚举: 0=8.8寸 OTA7290B, 1=10.1寸 JD9365, 2=7寸 ILI9881C ===== */
+/* ===== LCD 面板型号枚举: 0=8.8寸 OTA7290B, 1=10.1寸 JD9365, 2=7寸 ILI9881C, 3=7B寸 EK79007 ===== */
 #define LCD_TYPE_OTA7290B (0)
 #define LCD_TYPE_JD9365 (1)
 #define LCD_TYPE_ILI9881C (2)
+#define LCD_TYPE_EK79007 (3)
 
-// 8.8 inch LCD --> LCD_TYPE_OTA7290B
+// 8.8 inch LCD  --> LCD_TYPE_OTA7290B
 // 10.1 inch LCD --> LCD_TYPE_JD9365
-// 7 inch LCD   --> LCD_TYPE_ILI9881C
-#define LCD_TYPE LCD_TYPE_ILI9881C // 当前装配的面板(默认7寸), 切换后 DISPLAY_WIDTH/HEIGHT 自动跟随
+// 7 inch LCD    --> LCD_TYPE_ILI9881C
+// 7B inch LCD   --> LCD_TYPE_EK79007 (1024x600, 默认)
+#define LCD_TYPE LCD_TYPE_EK79007 // 当前装配的面板(默认7B), 切换后 DISPLAY_WIDTH/HEIGHT 自动跟随
 
-/* ===== 显示分辨率:随 LCD_TYPE 自动展开(OTA7290B 480x1920 / JD9365 800x1280 / ILI9881C 720x1280) ===== */
+/* ===== 显示分辨率:随 LCD_TYPE 自动展开(OTA7290B 480x1920 / JD9365 800x1280 / ILI9881C 720x1280 / EK79007 1024x600) ===== */
 #if LCD_TYPE == LCD_TYPE_OTA7290B
 #define DISPLAY_WIDTH 480   // OTA7290B 横向像素
 #define DISPLAY_HEIGHT 1920 // OTA7290B 纵向像素(竖屏长条)
@@ -114,15 +117,20 @@
 #elif LCD_TYPE == LCD_TYPE_ILI9881C
 #define DISPLAY_WIDTH 720   // ILI9881C 横向像素
 #define DISPLAY_HEIGHT 1280 // ILI9881C 纵向像素
+#elif LCD_TYPE == LCD_TYPE_EK79007
+#define DISPLAY_WIDTH 1024  // EK79007(7B) 横向像素
+#define DISPLAY_HEIGHT 600  // EK79007(7B) 纵向像素(横屏)
 #else
 #error "Unsupported LCD_TYPE" // 防止误填, 编译期直接报错
 #endif
 
 #define LCD_BIT_PER_PIXEL (16) // RGB565, 与 DPI in/out color format 对应
 
-/* 复位脚: OTA7290B/JD9365 无独立复位脚(靠上电时序); ILI9881C 使用 GPIO27 硬件复位. */
+/* 复位脚: OTA7290B/JD9365 无独立复位脚(靠上电时序); ILI9881C=GPIO27, EK79007(7B)=GPIO33. */
 #if LCD_TYPE == LCD_TYPE_ILI9881C
 #define PIN_NUM_LCD_RST GPIO_NUM_27
+#elif LCD_TYPE == LCD_TYPE_EK79007
+#define PIN_NUM_LCD_RST GPIO_NUM_33
 #else
 #define PIN_NUM_LCD_RST GPIO_NUM_NC
 #endif
@@ -143,9 +151,16 @@
 #define DISPLAY_OFFSET_X  0
 #define DISPLAY_OFFSET_Y  0
 
-/* ===== 背光:由 CustomBacklight 经 I2C(0x45/0x96) 控制, 故此处无 PWM 脚, 保持 NC ===== */
+/* ===== 背光 =====
+ * EK79007(7B): GPIO32 PWM, 高电平点亮需输出反相(与 wifi6-touch-lcd 板 7B 一致).
+ * 其余屏幕: 由 CustomBacklight 经 I2C(0x45/0x96) 控制, 无 PWM 脚, 保持 NC. */
+#if LCD_TYPE == LCD_TYPE_EK79007
+#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_32
+#define DISPLAY_BACKLIGHT_OUTPUT_INVERT true
+#else
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_NC
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false // 无 GPIO 背光, 反相标志保留仅为接口兼容
+#endif
 
 /* Herdsman UI 布局开关: 置 0 即隐藏该栏并把空间让给中间聊天区(见 herdsman_lcd_display.cc).
  * SHOW_LEFT_LOGO=左栏音量柱形图及对话按钮; SHOW_RIGHT_BUTTONS=右栏生产趋势图.
