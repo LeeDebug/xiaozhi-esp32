@@ -1,5 +1,27 @@
 # Waveshare ESP32-P4-NANO
 
+## Ethernet and Wi-Fi
+
+Release variants default to `CONFIG_XIAOZHI_NETWORK_ETHERNET=y`, which enables
+Ethernet priority with Wi-Fi backup. The network worker allows Ethernet 10 seconds
+from network startup to establish a link **and obtain an IPv4 address**. Saved
+Wi-Fi credentials are tried in parallel. After the Ethernet deadline, Wi-Fi is
+used if Ethernet is unavailable; missing credentials enter provisioning immediately,
+and an unsuccessful primary Wi-Fi connection enters provisioning after 60 seconds.
+A failed backup Wi-Fi connection does not interrupt working Ethernet.
+
+Ethernet is selected as the default route whenever ready, including after recovery.
+Wi-Fi stays connected as backup. A route change reports a disconnect/reconnect so
+an active conversation can close its old connection; existing TCP sessions are not
+migrated between interfaces. A provisioning portal remains open until credentials
+are submitted, even if Ethernet becomes ready meanwhile. BOOT during startup also
+opens provisioning. The existing Wi-Fi-only menuconfig option remains available.
+
+Hardware validation: boot with/without cable, link without DHCP, saved valid/invalid
+Wi-Fi credentials, empty credentials, Wi-Fi timeout and portal submission, unplug
+and replug Ethernet with Wi-Fi connected, and interrupt backup Wi-Fi while Ethernet
+is active. Check default route, DHCP/DNS and reconnect for both WebSocket and MQTT/UDP.
+
 ## Audio device selection
 
 Set `AUDIO_DEVICE` directly in this board's `config.h` before building:
@@ -139,12 +161,33 @@ descriptors or power delivery.
 
 This board starts an on-demand RTU master on UART1 (TX GPIO20, RX GPIO21) at 9600 baud, 8 data bits, no parity, and 1 stop bit. Automatic polling is currently disabled by `kAutomaticPollingEnabled`; set it to `true` to restore the polling task.
 
-- MCP tools `self.production.main_water_valve.set` and `self.production.main_water_valve.get` write/read register 0x6B only when invoked. A successful function-code 0x06 response means the write command was accepted; current hardware state is queried separately with the getter.
-- MCP tool `self.production.water_temperature.get` reads register 0x6C only when invoked and returns its value as Celsius using a 0.001 scale.
-- MCP tools `self.production.light.get` and `self.production.lights.get` read one or both configured light channels from registers 0x3B-0x3C.
-- MCP tools `self.production.light_1.open`, `self.production.light_1.close`, `self.production.light_2.open`, and `self.production.light_2.close` control the two light channels. Brightness is limited to 0-100 percent, where 0 means off.
-- MCP tool `self.production.silos.get_info` reads the current signed 32-bit weights of silos 1-4 from register pairs 0x02/0x03, 0x0E/0x0F, 0x1A/0x1B, and 0x26/0x27. The low word is read first, as required by the protocol.
-- Valve writes use protocol value 1 for open and 2 for closed.
+The tool set follows `docs/big-herdsman-docs/AI 语音管家‑生产监控终端 PMC Modbus‑RTU 完整指令集.md` and `docs/big-herdsman-docs/AI语音管家与生产监控终端通讯控制逻辑表.xlsx`. It covers holding registers 0x00-0xA6 in functional groups (all names use the `self.production.` prefix):
+
+| Group | Tools | Registers |
+| --- | --- | --- |
+| Device | `device.get_info`, `device.address.set`, `modules.get`, `log.get` | 0x00-0x01, 0xA6, 0x6A |
+| Silos | `silos.get_info`, `silos.get_statistics` | 0x02-0x31 |
+| Water meters | `water_meters.get` | 0x32-0x3A |
+| Lights | `light.get`, `lights.get`, `light_1..4.open/close`, `lights.set_all`, `light_schedule.get/set` | 0x3B-0x3E, 0x8D-0x94 |
+| Power | `power.get` | 0x3F-0x46 |
+| System status | `system_status.get`, `daily_mortality.set` | 0x47-0x4D |
+| Alarms | `alarms.get`, `alarm_pause.set` | 0x4E-0x66, 0x95 |
+| Water valve / temperature | `main_water_valve.get/set`, `water_temperature.get` | 0x6B-0x6C |
+| Dosing | `dosing.get`, `dosing.set` | 0x6D |
+| Flushing | `flush.get`, `flush.start`, `flush.stop`, `flush_schedule.set`, `flush_config.set` | 0x6E-0x7A |
+| Feed carts | `feed_cart.get`, `feed_cart.start`, `feed_cart.start_time.set` | 0x7B-0x82 |
+| Feed lines | `feed_lines.get`, `feed_lines.set`, `feed_line_mode.set`, `derailment.get` | 0x83-0x8C |
+| Eggs | `eggs.get` | 0x96-0xA5 (+0x47 for laying rate) |
+
+Notes on behaviour and protocol interpretation:
+
+- Reading a functional group uses one function-code 0x03 request for the whole contiguous block (for example 48 registers for all four silos, 25 registers for all alarms). 32-bit values are assembled low word first; water-meter values use a 0.01 fixed-point scale and water temperature / ratios use 0.001. Neither is IEEE754.
+- All writes use function-code 0x06. Bitfield registers (0x6D, 0x6E, 0x7B/0x7D/0x7F, 0x95) are read-modify-written so read-only high bytes and unrelated bits are preserved. Flush start, flush scheduling and feed cart start first read the relevant state/mode registers and refuse to act when the equipment is busy or in emergency mode. `device.address.set` also updates the local master address and re-reads 0x01 with the new ID.
+- `lights.set_all` writes 0x3B-0x3E sequentially with four 0x06 requests and reads them back. The protocol document's single-frame 0x10 batch write is **not** available because `ProductionModbus` does not implement function code 0x10; the four writes are not atomic.
+- Two documents disagree on bit ordering for 0x87/0x88 (the instruction set says bit0 is line 1; the logic table says "from high to low"). The tools follow the instruction set and always return `raw_value` so the mapping can be checked against real hardware. The logic table also shows `27 3B` as the encoded form of 23:59 while the tools use `(hour << 8) | minute` (`17 3B`); verify this encoding on hardware before relying on `light_schedule.set`.
+- Register 0x4D ("time", write-only) is read by `system_status.get` but has no write tool because the protocol does not define its encoding. The voice scenario "schedule a flush 30 minutes from now" is exposed as an explicit week/hour/minute triple; the caller must convert relative time to an absolute schedule.
+- Laying rate is computed as `egg_total / chicken_count * 100`. Confirm whether 0x96 is a daily or cumulative total before using that ratio operationally.
+- `silos.get_info`, `main_water_valve.*`, `water_temperature.get` and the original light tools keep their previous semantics. `light.get` now accepts channels 1-4 and `lights.get` returns four entries instead of two. Valve writes still use protocol value 1 for open and 2 for closed.
 
 The device address defaults to 0, which means not configured; Modbus reads and writes are disabled until `ProductionModbus::SetDeviceAddress(1..247)` is called. Successful on-demand reads are also retained in the cache and are available through `GetCachedRegister()` and `GetSnapshot()`. Reads and writes are serialized by a shared bus mutex.
 
@@ -195,7 +238,13 @@ Only TX and RX are configured. The external RS485 transceiver must provide autom
 The existing MIPI display rotation provides a landscape dashboard (1920 x 480
 for OTA7290B, 1280 x 800 for JD9365). The top bar shows the transparent brand
 logo on the left and the settings button on the right. The clock is right-aligned
-to the left of the Wi-Fi, battery, mute, and settings slots, separate from status text. The home content uses
+to the left of the Wi-Fi, Ethernet, battery, mute, and settings slots, separate from status text.
+Wi-Fi and Ethernet indicators refresh independently on every status-bar tick (including
+backup-interface changes). Wi-Fi shows green signal bars when connected and a gray
+off icon when disconnected. The RJ45 Ethernet icon is green with a usable IPv4
+address, amber while the link is up awaiting an address, and gray with a diagonal
+slash when disconnected or disabled in a Wi-Fi-only build. These indicators show
+local interface readiness, not server reachability or which interface is primary. The home content uses
 20% / 50% / 30% columns for the audio meter, conversation, and production chart.
 The legacy `HERDSMAN_UI_SHOW_LEFT_LOGO` and `HERDSMAN_UI_SHOW_RIGHT_BUTTONS`
 switches now control the audio/control column and production chart respectively.
@@ -222,8 +271,9 @@ chat button. This is a decorative
 amplitude meter, not a frequency spectrum or calibrated sound-pressure meter.
 It allocates no audio buffers and never reads the microphone from the UI thread.
 
-The top bar, conversation area (including message bubbles), and recommended-question
-panel use the page background color. Startup board/version metadata is hidden from
+The top bar, conversation area, and recommended-question panel use the page
+background color. Rounded message bubbles use the theme's user, assistant, and
+system bubble colors to distinguish messages. Startup board/version metadata is hidden from
 the conversation; other system messages remain visible.
 
 The chart uses seven fixed demo samples, with no demo caption or displayed units. Feed (blue, 0–1500 kg)
@@ -243,7 +293,39 @@ python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/board
 For this firmware's include layout, use `"lvgl.h"` in the generated C file's
 `LV_BUILD_TEST` include branch as well. Board Kconfig selects the canvas and chart widgets
 and Montserrat 14 tick font; no generated sdkconfig should be edited by hand.
+
+Chat avatars use `resources/ai.png` for assistant messages and `resources/me.png`
+for user messages. Keep both PNGs at 54 × 54 pixels with an alpha channel; they
+are displayed at native size inside circular containers. Regenerate their
+ARGB8888 assets after replacing the PNGs:
+
+```sh
+python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/boards/waveshare/esp32-p4-nano/assets main/boards/waveshare/esp32-p4-nano/resources/ai.png
+python scripts/Image_Converter/LVGLImage.py --ofmt C --cf ARGB8888 -o main/boards/waveshare/esp32-p4-nano/assets main/boards/waveshare/esp32-p4-nano/resources/me.png
+```
+
+Use `"lvgl.h"` in the generated avatars' `LV_BUILD_TEST` include branch too.
+Check avatar transparency, circular clipping, and left/right message alignment
+on the LCD after flashing.
+
 Hardware checks: logo transparency, ruler alignment on both LCD sizes, settings
 and chat touch targets, listening response, doubled excursion, minimum bars while speaking or idle,
 silence decay, interruption,
 and reconnection. A build alone does not validate those behaviors.
+
+## P4X OTA staging
+
+The `esp32-p4x-nano-10.1-a` variant downloads the complete image to a 5 MiB
+PSRAM buffer before starting flash writes. An internal 4 KiB buffer is used for
+network reads and flash writes. A missing/oversized HTTP body, incomplete download,
+invalid image header, or failed allocation aborts without erasing the OTA partition.
+The variant keeps PSRAM XiP disabled and FreeRTOS in IRAM; OTA previously worked
+with that combination, although the display flickered while flash was written.
+The download phase reports 0-100% in the status bar. After the full image is
+received, the UI shows “正在写入，完成后将自动重启”, waits 1.5 seconds,
+then fades the backlight off and waits 0.6 seconds before the first flash write.
+If writing fails, the previous brightness is restored. Staging separates download
+from flashing; the screen is deliberately dark during flash writes because display
+refresh can flicker while flash is busy.
+A contiguous 5 MiB free PSRAM block is required. Validate on hardware with Ethernet
+and Wi-Fi, interrupted downloads, OTA boot, display, and audio.

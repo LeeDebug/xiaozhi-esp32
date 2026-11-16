@@ -1,0 +1,21 @@
+✔ CRC agrees with published Modbus example and ASCII check vector (0.413625ms)
+✔ hex parser rejects partial, invalid and empty input (0.518959ms)
+✔ 03 responds with big-endian register bytes, including all 78 firmware registers (0.195083ms)
+✔ 06 echoes request, mutates one register, and subsequent read observes it (0.146583ms)
+✔ invalid function, range, and quantity return appropriate exception frames (0.103917ms)
+✔ CRC, malformed requests, and foreign addresses are silent and never write (0.0795ms)
+✔ broadcast writes update without replying; reads and invalid writes remain silent (0.067666ms)
+✔ silo low-word-first int32 encoding is returned unchanged on wire (0.041792ms)
+✔ decoder handles every split position and multiple concatenated frames (0.203583ms)
+✔ decoder recovers following noise, corrupt CRC, and truncated prefixes (0.128625ms)
+✔ unsupported function is extracted at idle and receives illegal-function exception (0.058208ms)
+✔ variable-length unsupported request is recognized and known short request is discarded (0.055542ms)
+✔ decoder bounds noise retention and diagnostics, and reset clears pending bytes (10.767709ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 45.550125

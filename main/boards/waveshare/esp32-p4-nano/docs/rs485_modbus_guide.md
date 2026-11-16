@@ -80,20 +80,30 @@ RS485（Modbus-RTU）通信的完整配置分布在三层：
 
 该文件把上面的 Modbus 能力包装成一组 MCP 工具。入口 `InitializeProductionMcpTools()` 用 `static bool initialized` 保证**幂等**（重复调用只注册一次），并向 `McpServer` 单例逐个 `AddTool(...)`。
 
-### 4.1 工具清单（已注册）
+### 4.1 工具清单（已注册，共 43 个）
 
-| MCP 工具名 | 类型 | 寄存器 | 说明 |
-|------------|------|--------|------|
-| `self.production.main_water_valve.set` | 写 | 0x6B | 开/关主水阀；写 1=开、2=关 |
-| `self.production.main_water_valve.get` | 读 | 0x6B | 读水阀状态：0 无、1 开、2 关 |
-| `self.production.water_temperature.get` | 读 | 0x6C | 读水温，协议值 ×0.001 ℃ |
-| `self.production.light.get` | 读 | 0x3B / 0x3C | 读指定一路（channel 1/2）亮度 0-100% |
-| `self.production.lights.get` | 读 | 0x3B,0x3C | 一次读两路灯光状态与亮度 |
-| `self.production.light_1.open` | 写 | 0x3B | 开灯 1 并设置亮度百分比 |
-| `self.production.light_1.close` | 写 | 0x3B | 关灯 1（写 0） |
-| `self.production.light_2.open` | 写 | 0x3C | 开灯 2 并设置亮度百分比 |
-| `self.production.light_2.close` | 写 | 0x3C | 关灯 2（写 0） |
-| `self.production.silos.get_info` | 读 | 0x02,0x0E,0x1A,0x26 | 读 1-4 号料塔重量（kg），每塔 2 字小端 int32 |
+按 `docs/big-herdsman-docs/` 下的指令集与通讯控制逻辑表补齐，覆盖保持寄存器 0x00-0xA6。
+完整的工具名/寄存器对照表见 `README.md` 的 *Production-monitoring Modbus* 一节。
+
+| 功能组 | 代表工具 | 寄存器范围 |
+|--------|----------|------------|
+| 设备信息 | `device.get_info` / `device.address.set` / `modules.get` / `log.get` | 0x00-0x01, 0x6A, 0xA6 |
+| 料塔 | `silos.get_info` / `silos.get_statistics` | 0x02-0x31 |
+| 水表 | `water_meters.get` | 0x32-0x3A |
+| 灯光 | `light.get` / `lights.get` / `light_1..4.open` `.close` / `lights.set_all` / `light_schedule.get` `.set` | 0x3B-0x3E, 0x8D-0x94 |
+| 电压电能 | `power.get` | 0x3F-0x46 |
+| 系统状态 | `system_status.get` / `daily_mortality.set` | 0x47-0x4D |
+| 报警 | `alarms.get` / `alarm_pause.set` | 0x4E-0x66, 0x95 |
+| 主水阀/水温 | `main_water_valve.get` `.set` / `water_temperature.get` | 0x6B-0x6C |
+| 加药 | `dosing.get` / `dosing.set` | 0x6D |
+| 水线冲洗 | `flush.get` / `flush.start` / `flush.stop` / `flush_schedule.set` / `flush_config.set` | 0x6E-0x7A |
+| 料线行车 | `feed_cart.get` / `feed_cart.start` / `feed_cart.start_time.set` | 0x7B-0x82 |
+| 料线状态 | `feed_lines.get` / `feed_lines.set` / `feed_line_mode.set` / `derailment.get` | 0x83-0x8C |
+| 鸡蛋计数 | `eggs.get` | 0x96-0xA5（另读 0x47 计算产蛋率） |
+
+> 新增工具沿用「`AddTool` + `EnsureDeviceAddressIsConfigured` + `*OrThrow` + `cJSON` 返回」模板；
+> 连续寄存器用一次 `ReadHoldingRegisters()` 批量读，位域寄存器先读后改再写。
+> 协议歧义（0x87/0x88 位序、灯光定时编码、0x4D 时间格式）与 0x10 批量写的限制见 README。
 
 ### 4.2 一个工具的标准执行流程
 
@@ -221,10 +231,11 @@ esp-idf Modbus master → UART1 (9600-8N1) → RS485 收发器 → 从机设备
 
 ## 7. 常见风险与未决项
 
-- **从机地址写死 0x01**：当前不支持多从机动态切换，扩展前需先把地址参数化（暴露为工具或配置项）。
+- **从机地址启动时写死 0x01**：`esp32-p4-nano.cc` 仍以 `SetDeviceAddress(0x01)` 初始化；`self.production.device.address.set` 可在运行时改写 0x01 并同步本地主站地址（回读失败会回滚），但仍不支持一条总线上多个从机并发访问。
 - **无 DE/RE 控制**：硬件需自带 RS485 自动收发切换；若换用普通 MAX485 这类需 RTS 的芯片，需要改 `production_modbus.cc` 增加 GPIO 方向控制。
 - **轮询未启用**：`kAutomaticPollingEnabled = false`。若后续要显示屏常驻刷新状态，可开启 `PollingTask`（已留好框架），届时需注意与按需读写的缓存一致性。
-- **写后立即回读**：现有工具多数直接返回「写入值」作为结果；若从机可能拒绝/钳位，建议在 `WriteRegisterOrThrow` 后再 `ReadRegisterOrThrow` 一次以确认真实状态（参考 `main_water_valve.set` 已先读旧值）。
+- **功能码 0x10 未实现**：`ProductionModbus` 只提供 0x03/0x06，因此协议文档中的「4 路灯单帧批量总控」由 `lights.set_all` 用 4 次 0x06 顺序写 + 回读模拟，不具原子性。若要求严格单帧总控，需在底层增加 `WriteHoldingRegisters`。
+- **写后立即回读**：新增的写工具均先读旧值，多数还会回读确认；返回值中同时给出 `raw_value` 与 `previous_raw_value`，便于发现从机拒绝或钳位的情况。
 
 ---
 
