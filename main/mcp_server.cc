@@ -1,36 +1,131 @@
 /*
  * MCP Server Implementation
- * Reference: https://modelcontextprotocol.io/specification/2024-11-05
+ * Revisions: 2024-11-05 (legacy) and 2026-07-28 (per-request metadata)
  */
 
 #include "mcp_server.h"
 #include <esp_app_desc.h>
-#include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_pthread.h>
-#include <esp_timer.h>
 #include <algorithm>
+#include <cctype>
+#include <climits>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
-#include <memory>
+#include <iterator>
+#include <new>
+#include <optional>
+#include <string_view>
 
 #include "application.h"
 #include "board.h"
 #include "display.h"
-#include "lvgl_display.h"
+#include "lvgl_image.h"
 #include "lvgl_theme.h"
-#include "oled_display.h"
 #include "settings.h"
+
+#ifdef HAVE_LVGL
+#include <esp_heap_caps.h>
+#include <esp_timer.h>
+#endif
 
 #define TAG "MCP"
 
+namespace {
+#ifdef HAVE_LVGL
+constexpr char kShowImageTool[] = "self.screen.show_image";
+
+ToolResult DownloadImagePopup(Display& display, const std::string& url) {
+    if ((!url.starts_with("http://") && !url.starts_with("https://")) ||
+        url.find_first_of("\r\n\t ") != std::string::npos) {
+        return std::unexpected("Invalid image URL");
+    }
+    auto* network = Board::GetInstance().GetNetwork();
+    if (network == nullptr) {
+        return std::unexpected("Network is unavailable");
+    }
+    // Slot 3 is used by camera and screen tools that can run while this worker is active.
+    auto http = network->CreateHttp(4);
+    if (http == nullptr) {
+        return std::unexpected("HTTP client is unavailable");
+    }
+    constexpr int kReadTimeoutMs = 10000;
+    constexpr int64_t kDownloadTimeoutUs = 30000000;
+    const auto deadline = esp_timer_get_time() + kDownloadTimeoutUs;
+    http->SetTimeout(kReadTimeoutMs);
+    http->SetHeader("Accept", "image/png,image/jpeg");
+    if (auto opened = http->Open("GET", url); !opened) {
+        return std::unexpected("Failed to open image URL: " + opened.error().ToString());
+    }
+    const auto status = http->GetStatusCode();
+    if (!status || *status != 200) {
+        return std::unexpected("Failed to download image");
+    }
+
+    constexpr size_t kMaxImageSize = 1024 * 1024;
+    const size_t expected_size = http->GetBodyLength();
+    if (expected_size > kMaxImageSize) {
+        return std::unexpected("Image exceeds 1 MiB");
+    }
+    const size_t capacity = expected_size != 0 ? expected_size : kMaxImageSize;
+    const bool has_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) != 0;
+    const uint32_t caps = MALLOC_CAP_8BIT | (has_psram ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL);
+    Display::ImageBuffer data(heap_caps_malloc(capacity, caps), heap_caps_free);
+    if (!data) {
+        return std::unexpected(has_psram ? "Not enough PSRAM for image download"
+                                         : "Not enough internal RAM for image download");
+    }
+
+    auto read = [&](char* buffer, size_t size) -> std::expected<int, std::string> {
+        const auto remaining_ms = (deadline - esp_timer_get_time()) / 1000;
+        if (remaining_ms <= 0) {
+            return std::unexpected("Image download timed out");
+        }
+        http->SetTimeout(std::min<int64_t>(kReadTimeoutMs, remaining_ms));
+        const auto count = http->Read(buffer, size);
+        if (!count || *count < 0 || static_cast<size_t>(*count) > size) {
+            return std::unexpected("Failed to read image data");
+        }
+        return *count;
+    };
+    size_t used = 0;
+    while (used < capacity) {
+        const auto count =
+            read(static_cast<char*>(data.get()) + used, std::min<size_t>(4096, capacity - used));
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count == 0) {
+            break;
+        }
+        used += *count;
+    }
+    if (used == capacity) {
+        char extra;
+        const auto count = read(&extra, 1);
+        if (!count) {
+            return std::unexpected(count.error());
+        }
+        if (*count != 0) {
+            return std::unexpected("Image exceeds its declared length or 1 MiB");
+        }
+    }
+    if (used == 0 || (expected_size != 0 && used != expected_size)) {
+        return std::unexpected("Incomplete image download");
+    }
+    http.reset();
+    if (const char* error = display.ShowImagePopup(std::move(data), used)) {
+        return std::unexpected(error);
+    }
+    return true;
+}
+#endif
+}  // namespace
+
 McpServer::McpServer() {}
 
-McpServer::~McpServer() {
-    for (auto tool : tools_) {
-        delete tool;
-    }
-    tools_.clear();
-}
+McpServer::~McpServer() = default;
 
 void McpServer::AddCommonTools() {
     // *Important* To speed up the response time, we add the common tools to the beginning of
@@ -46,11 +141,14 @@ void McpServer::AddCommonTools() {
 
     AddTool("self.get_device_status",
             "Provides the real-time information of the device, including the current status of the "
-            "audio speaker, screen, battery, network, etc.\n"
+            "audio speaker, screen, battery, network, and why the device last restarted.\n"
             "Use this tool for: \n"
             "1. Answering questions about current condition (e.g. what is the current volume of "
             "the audio speaker?)\n"
-            "2. As the first step to control the device (e.g. turn up / down the volume of the "
+            "2. Answering why the device rebooted or restarted - whether it was powered on, "
+            "reset by its button, or crashed. This is about the device, not about the "
+            "conversation.\n"
+            "3. As the first step to control the device (e.g. turn up / down the volume of the "
             "audio speaker, etc.)",
             PropertyList(), [&board](const PropertyList& properties) -> ReturnValue {
                 return board.GetDeviceStatusJson();
@@ -96,132 +194,15 @@ void McpServer::AddCommonTools() {
                 });
     }
 
-    auto popup_display = dynamic_cast<LvglDisplay*>(display);
-    if (popup_display && !dynamic_cast<OledDisplay*>(display)) {
-        AddTool("self.screen.show_image",
+    if (display && display->SupportsImagePopup()) {
+        AddTool(kShowImageTool,
                 "Show a knowledge-base image in a full-screen popup with a close button. "
-                "When asked for an image, search the knowledge base first, then pass the matching "
-                "image's direct HTTP/HTTPS URL. Never invent URLs. "
-                "Requires a PNG or JPEG image (maximum 1 MiB and 1048576 pixels; JPEG is "
-                "unavailable on ESP32).",
-                PropertyList({Property("url", kPropertyTypeString)}),
-                [popup_display](const PropertyList& properties) -> ReturnValue {
-                    const auto url = properties["url"].value<std::string>();
-                    if (url.size() > 2048 ||
-                        (url.compare(0, 7, "http://") != 0 && url.compare(0, 8, "https://") != 0) ||
-                        url.find_first_of("\r\n\t ") != std::string::npos) {
-                        throw std::runtime_error("Invalid image URL");
-                    }
-                    auto* network = Board::GetInstance().GetNetwork();
-                    if (!network) {
-                        throw std::runtime_error("Network is unavailable");
-                    }
-                    auto http = network->CreateHttp(3);
-                    if (!http) {
-                        throw std::runtime_error("HTTP client is unavailable");
-                    }
-                    http->SetTimeout(10000);
-                    http->SetHeader("Accept", "image/png,image/jpeg");
-                    struct HttpCloser {
-                        Http* client;
-                        ~HttpCloser() { client->Close(); }
-                    } closer{http.get()};
-                    if (!http->Open("GET", url) || http->GetStatusCode() != 200) {
-                        throw std::runtime_error("Failed to download image");
-                    }
-                    constexpr size_t max_size = 1024 * 1024;
-                    const size_t expected = http->GetBodyLength();
-                    if (expected > max_size) {
-                        throw std::runtime_error("Image exceeds 1 MiB");
-                    }
-                    // Bound unknown-length (chunked) responses as well as fixed-length responses.
-                    const size_t capacity = expected ? expected : max_size;
-                    // Preserve internal RAM for audio/network tasks. On devices with
-                    // PSRAM, fail rather than silently consuming internal RAM for images.
-                    const bool has_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM) != 0;
-                    const uint32_t caps =
-                        MALLOC_CAP_8BIT | (has_psram ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL);
-                    std::unique_ptr<void, decltype(&heap_caps_free)> data(
-                        heap_caps_malloc(capacity, caps), heap_caps_free);
-                    if (!data) {
-                        throw std::runtime_error(
-                            has_psram ? "Not enough PSRAM for image download"
-                                      : "Not enough internal RAM for image download");
-                    }
-                    ESP_LOGI(TAG, "Image download buffer: %u bytes in %s",
-                             static_cast<unsigned>(capacity), has_psram ? "PSRAM" : "internal RAM");
-                    size_t used = 0;
-                    const int64_t deadline = esp_timer_get_time() + 30000000;
-                    while (used < capacity) {
-                        if (esp_timer_get_time() > deadline) {
-                            throw std::runtime_error("Image download timed out");
-                        }
-                        int count = http->Read(static_cast<char*>(data.get()) + used,
-                                               std::min(size_t(4096), capacity - used));
-                        if (count < 0) {
-                            throw std::runtime_error("Image download failed");
-                        }
-                        if (count == 0) {
-                            break;
-                        }
-                        used += count;
-                    }
-                    char extra;
-                    if (used == capacity && http->Read(&extra, 1) != 0) {
-                        throw std::runtime_error("Image exceeds declared length or limit");
-                    }
-                    if (expected && used != expected) {
-                        throw std::runtime_error("Incomplete image download");
-                    }
-                    // Validate dimensions before either decoder allocates its pixel buffer.
-                    const auto* bytes = static_cast<const uint8_t*>(data.get());
-                    const uint8_t signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
-                    uint32_t width = 0;
-                    uint32_t height = 0;
-                    auto read_be32 = [](const uint8_t* value) -> uint32_t {
-                        return (uint32_t(value[0]) << 24) | (uint32_t(value[1]) << 16) |
-                               (uint32_t(value[2]) << 8) | value[3];
-                    };
-                    if (used >= 33 && memcmp(bytes, signature, 8) == 0 &&
-                        memcmp(bytes + 12, "IHDR", 4) == 0 && read_be32(bytes + 8) == 13) {
-                        width = read_be32(bytes + 16);
-                        height = read_be32(bytes + 20);
-#ifndef CONFIG_IDF_TARGET_ESP32
-                    } else if (used >= 4 && bytes[0] == 0xff && bytes[1] == 0xd8) {
-                        // Parse bounded JPEG segments until the baseline SOF header. Progressive
-                        // JPEG is intentionally rejected because the software decoder cannot decode
-                        // it.
-                        size_t offset = 2;
-                        while (offset + 4 <= used) {
-                            if (bytes[offset++] != 0xff)
-                                break;
-                            while (offset < used && bytes[offset] == 0xff)
-                                ++offset;
-                            if (offset >= used)
-                                break;
-                            const uint8_t marker = bytes[offset++];
-                            if (marker == 0xda || marker == 0xd9)
-                                break;
-                            if (offset + 2 > used)
-                                break;
-                            const size_t length = (size_t(bytes[offset]) << 8) | bytes[offset + 1];
-                            if (length < 2 || length > used - offset)
-                                break;
-                            if (marker == 0xc0 && length >= 8) {
-                                height = (uint32_t(bytes[offset + 3]) << 8) | bytes[offset + 4];
-                                width = (uint32_t(bytes[offset + 5]) << 8) | bytes[offset + 6];
-                                break;
-                            }
-                            offset += length;
-                        }
-#endif
-                    }
-                    if (!width || !height || width > 2048 || height > 2048 ||
-                        uint64_t(width) * height > 1048576) {
-                        throw std::runtime_error("Unsupported image or dimensions exceed limit");
-                    }
-                    popup_display->ShowImagePopup(data.release(), used);
-                    return true;
+                "When asked for an image, search the knowledge base and pass the matching direct "
+                "HTTP/HTTPS URL. Never invent URLs. Use a PNG or baseline JPEG up to 1 MiB and "
+                "1048576 pixels. The original ESP32 supports PNG only.",
+                PropertyList({Property("url", kPropertyTypeString).SetMaxLength(2048)}),
+                [display](const PropertyList& properties) -> ToolResult {
+                    return DownloadImagePopup(*display, properties["url"].value<std::string>());
                 });
     }
 
@@ -235,21 +216,32 @@ void McpServer::AddCommonTools() {
                 "Return:\n"
                 "  A JSON object that provides the photo information.",
                 PropertyList({Property("question", kPropertyTypeString)}),
-                [camera](const PropertyList& properties) -> ReturnValue {
+                [](const PropertyList& properties, const McpRequestContext& context) -> ToolResult {
+                    auto camera = Board::GetInstance().GetCamera();
+                    if (camera == nullptr) {
+                        return std::unexpected("Camera unavailable");
+                    }
                     // Lower the priority to do the camera capture
                     TaskPriorityReset priority_reset(1);
 
                     if (!camera->Capture()) {
-                        throw std::runtime_error("Failed to capture photo");
+                        return std::unexpected("Failed to capture photo");
                     }
                     auto question = properties["question"].value<std::string>();
-                    return camera->Explain(question);
+                    auto result = context.vision ? camera->Explain(question, context.vision->url,
+                                                                   context.vision->token)
+                                                 : camera->Explain(question);
+                    if (!result) {
+                        return std::unexpected(std::move(result.error()));
+                    }
+                    return std::move(*result);
                 });
     }
 #endif
 
     // Restore the original tools list to the end of the tools list
-    tools_.insert(tools_.end(), original_tools.begin(), original_tools.end());
+    tools_.insert(tools_.end(), std::make_move_iterator(original_tools.begin()),
+                  std::make_move_iterator(original_tools.end()));
 }
 
 void McpServer::AddUserOnlyTools() {
@@ -296,19 +288,15 @@ void McpServer::AddUserOnlyTools() {
 
     // Display control
 #ifdef HAVE_LVGL
-    auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
-    if (display) {
+    auto display = Board::GetInstance().GetDisplay();
+    if (display != nullptr && display->SupportsGuiOperations()) {
         AddUserOnlyTool("self.screen.get_info",
                         "Information about the screen, including width, height, etc.",
                         PropertyList(), [display](const PropertyList& properties) -> ReturnValue {
                             cJSON* json = cJSON_CreateObject();
                             cJSON_AddNumberToObject(json, "width", display->width());
                             cJSON_AddNumberToObject(json, "height", display->height());
-                            if (dynamic_cast<OledDisplay*>(display)) {
-                                cJSON_AddBoolToObject(json, "monochrome", true);
-                            } else {
-                                cJSON_AddBoolToObject(json, "monochrome", false);
-                            }
+                            cJSON_AddBoolToObject(json, "monochrome", display->IsMonochrome());
                             return json;
                         });
 
@@ -317,13 +305,13 @@ void McpServer::AddUserOnlyTools() {
             "self.screen.snapshot", "Snapshot the screen and upload it to a specific URL",
             PropertyList({Property("url", kPropertyTypeString),
                           Property("quality", kPropertyTypeInteger, 80, 1, 100)}),
-            [display](const PropertyList& properties) -> ReturnValue {
+            [display](const PropertyList& properties) -> ToolResult {
                 auto url = properties["url"].value<std::string>();
                 auto quality = properties["quality"].value<int>();
 
                 std::string jpeg_data;
                 if (!display->SnapshotToJpeg(jpeg_data, quality)) {
-                    throw std::runtime_error("Failed to snapshot screen");
+                    return std::unexpected("Failed to snapshot screen");
                 }
 
                 ESP_LOGI(TAG, "Upload snapshot %u bytes to %s", jpeg_data.size(), url.c_str());
@@ -333,9 +321,17 @@ void McpServer::AddUserOnlyTools() {
 
                 auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
                 http->SetHeader("Content-Type", "multipart/form-data; boundary=" + boundary);
-                if (!http->Open("POST", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
+                if (auto opened = http->Open("POST", url); !opened) {
+                    return std::unexpected("Failed to open URL: " + url + " (" +
+                                           opened.error().ToString() + ")");
                 }
+                auto write_or_fail = [&http](const char* data,
+                                             size_t size) -> std::optional<std::string> {
+                    if (auto written = http->Write(data, size); !written) {
+                        return written.error().ToString();
+                    }
+                    return std::nullopt;
+                };
                 {
                     // 文件字段头部
                     std::string file_header;
@@ -345,23 +341,43 @@ void McpServer::AddUserOnlyTools() {
                         "filename=\"screenshot.jpg\"\r\n";
                     file_header += "Content-Type: image/jpeg\r\n";
                     file_header += "\r\n";
-                    http->Write(file_header.c_str(), file_header.size());
+                    if (auto error = write_or_fail(file_header.c_str(), file_header.size());
+                        error) {
+                        http->Close();
+                        return std::unexpected("Failed to upload screenshot: " + *error);
+                    }
                 }
 
                 // JPEG数据
-                http->Write((const char*)jpeg_data.data(), jpeg_data.size());
+                if (auto error = write_or_fail((const char*)jpeg_data.data(), jpeg_data.size());
+                    error) {
+                    http->Close();
+                    return std::unexpected("Failed to upload screenshot: " + *error);
+                }
 
                 {
                     // multipart尾部
                     std::string multipart_footer;
                     multipart_footer += "\r\n--" + boundary + "--\r\n";
-                    http->Write(multipart_footer.c_str(), multipart_footer.size());
+                    if (auto error =
+                            write_or_fail(multipart_footer.c_str(), multipart_footer.size());
+                        error) {
+                        http->Close();
+                        return std::unexpected("Failed to upload screenshot: " + *error);
+                    }
                 }
-                http->Write("", 0);
+                if (auto error = write_or_fail("", 0); error) {
+                    http->Close();
+                    return std::unexpected("Failed to upload screenshot: " + *error);
+                }
 
-                if (http->GetStatusCode() != 200) {
-                    throw std::runtime_error("Unexpected status code: " +
-                                             std::to_string(http->GetStatusCode()));
+                auto upload_status = http->GetStatusCode();
+                if (!upload_status) {
+                    return std::unexpected(upload_status.error().ToString());
+                }
+                if (*upload_status != 200) {
+                    return std::unexpected("Unexpected status code: " +
+                                           std::to_string(*upload_status));
                 }
                 std::string result = http->ReadAll();
                 http->Close();
@@ -372,39 +388,48 @@ void McpServer::AddUserOnlyTools() {
         AddUserOnlyTool(
             "self.screen.preview_image", "Preview an image on the screen",
             PropertyList({Property("url", kPropertyTypeString)}),
-            [display](const PropertyList& properties) -> ReturnValue {
+            [display](const PropertyList& properties) -> ToolResult {
                 auto url = properties["url"].value<std::string>();
                 auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
 
-                if (!http->Open("GET", url)) {
-                    throw std::runtime_error("Failed to open URL: " + url);
+                if (auto opened = http->Open("GET", url); !opened) {
+                    return std::unexpected("Failed to open URL: " + url + " (" +
+                                           opened.error().ToString() + ")");
                 }
-                int status_code = http->GetStatusCode();
-                if (status_code != 200) {
-                    throw std::runtime_error("Unexpected status code: " +
-                                             std::to_string(status_code));
+                auto status_code = http->GetStatusCode();
+                if (!status_code) {
+                    return std::unexpected(status_code.error().ToString());
+                }
+                if (*status_code != 200) {
+                    return std::unexpected("Unexpected status code: " +
+                                           std::to_string(*status_code));
                 }
 
                 size_t content_length = http->GetBodyLength();
-                char* data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_8BIT);
+                using BufferPtr = std::unique_ptr<char, decltype(&heap_caps_free)>;
+                BufferPtr data(
+                    static_cast<char*>(heap_caps_malloc(content_length, MALLOC_CAP_8BIT)),
+                    heap_caps_free);
                 if (data == nullptr) {
-                    throw std::runtime_error("Failed to allocate memory for image: " + url);
+                    return std::unexpected("Failed to allocate memory for image: " + url);
                 }
                 size_t total_read = 0;
                 while (total_read < content_length) {
-                    int ret = http->Read(data + total_read, content_length - total_read);
-                    if (ret < 0) {
-                        heap_caps_free(data);
-                        throw std::runtime_error("Failed to download image: " + url);
+                    auto ret = http->Read(data.get() + total_read, content_length - total_read);
+                    if (!ret) {
+                        return std::unexpected("Failed to download image: " + url);
                     }
-                    if (ret == 0) {
+                    if (*ret == 0) {
                         break;
                     }
-                    total_read += ret;
+                    total_read += *ret;
                 }
                 http->Close();
 
-                auto image = std::make_unique<LvglAllocatedImage>(data, content_length);
+                auto image = std::make_unique<LvglAllocatedImage>(data.release(), total_read);
+                if (!image->IsValid()) {
+                    return std::unexpected("Downloaded image is invalid: " + url);
+                }
                 display->SetPreviewImage(std::move(image));
                 return true;
             });
@@ -424,316 +449,477 @@ void McpServer::AddUserOnlyTools() {
                     });
 }
 
-void McpServer::AddTool(McpTool* tool) {
+void McpServer::LogToolInventory() const {
+    size_t user_only = 0;
+    for (const auto& tool : tools_) {
+        if (tool->user_only()) {
+            ++user_only;
+        }
+    }
+    ESP_LOGI(TAG, "%u tools registered: %u visible to the model, %u user-only",
+             (unsigned)tools_.size(), (unsigned)(tools_.size() - user_only), (unsigned)user_only);
+}
+
+void McpServer::AddTool(std::unique_ptr<McpTool> tool) {
     // Prevent adding duplicate tools
-    if (std::find_if(tools_.begin(), tools_.end(), [tool](const McpTool* t) {
-            return t->name() == tool->name();
+    if (std::find_if(tools_.begin(), tools_.end(), [&tool](const auto& existing) {
+            return existing->name() == tool->name();
         }) != tools_.end()) {
         ESP_LOGW(TAG, "Tool %s already added", tool->name().c_str());
         return;
     }
 
     ESP_LOGI(TAG, "Add tool: %s%s", tool->name().c_str(), tool->user_only() ? " [user]" : "");
-    tools_.push_back(tool);
+    tools_.push_back(std::move(tool));
 }
 
 void McpServer::AddTool(const std::string& name, const std::string& description,
-                        const PropertyList& properties,
-                        std::function<ReturnValue(const PropertyList&)> callback) {
-    AddTool(new McpTool(name, description, properties, callback));
+                        const PropertyList& properties, ToolCallback callback) {
+    AddTool(std::make_unique<McpTool>(name, description, properties, std::move(callback)));
+}
+
+void McpServer::AddTool(const std::string& name, const std::string& description,
+                        const PropertyList& properties, ContextToolCallback callback) {
+    AddTool(std::make_unique<McpTool>(name, description, properties, callback));
 }
 
 void McpServer::AddUserOnlyTool(const std::string& name, const std::string& description,
-                                const PropertyList& properties,
-                                std::function<ReturnValue(const PropertyList&)> callback) {
-    auto tool = new McpTool(name, description, properties, callback);
+                                const PropertyList& properties, ToolCallback callback) {
+    auto tool = std::make_unique<McpTool>(name, description, properties, std::move(callback));
     tool->set_user_only(true);
-    AddTool(tool);
+    AddTool(std::move(tool));
 }
 
-void McpServer::ParseMessage(const std::string& message) {
-    cJSON* json = cJSON_Parse(message.c_str());
+namespace {
+constexpr const char* kProtocolVersion = "io.modelcontextprotocol/protocolVersion";
+constexpr const char* kClientCapabilities = "io.modelcontextprotocol/clientCapabilities";
+constexpr const char* kVisionExtension = "me.xiaozhi/vision";
+constexpr const char* kModernVersion = "2026-07-28";
+constexpr const char* kSupportedVersions = R"(["2026-07-28","2024-11-05"])";
+
+std::string JsonString(const char* value) {
+    CJsonUniquePtr string(cJSON_CreateString(value));
+    CJsonStringUniquePtr encoded(string ? cJSON_PrintUnformatted(string.get()) : nullptr);
+    return encoded ? std::string(encoded.get()) : std::string();
+}
+
+void AppendServerInfo(std::string& output) {
+    output += "{\"name\":";
+    output += JsonString(BOARD_NAME);
+    output += ",\"version\":";
+    output += JsonString(esp_app_get_description()->version);
+    output += "}";
+}
+
+std::string ResultPrefix(const McpRequestContext& context) {
+    std::string prefix = "{\"jsonrpc\":\"2.0\",\"id\":";
+    prefix += context.id_json;
+    prefix += ",\"result\":";
+    if (context.modern) {
+        prefix += "{\"resultType\":\"complete\",\"_meta\":{\"io.modelcontextprotocol/serverInfo\":";
+        AppendServerInfo(prefix);
+        prefix += "}}";
+    }
+    return prefix;
+}
+
+std::optional<McpRequestContext::VisionConfig> ReadVisionConfig(const cJSON* vision) {
+    auto url = cJSON_GetObjectItemCaseSensitive(vision, "url");
+    auto token = cJSON_GetObjectItemCaseSensitive(vision, "token");
+    if (!cJSON_IsString(url)) {
+        return std::nullopt;
+    }
+    return McpRequestContext::VisionConfig{url->valuestring,
+                                           cJSON_IsString(token) ? token->valuestring : ""};
+}
+
+bool ValidVisionConfig(const McpRequestContext::VisionConfig& vision) {
+    const auto& url = vision.url;
+    const auto scheme_size = url.starts_with("https://")  ? 8u
+                             : url.starts_with("http://") ? 7u
+                                                          : 0u;
+    if (scheme_size == 0 || url.size() <= scheme_size || url[scheme_size] == '/' ||
+        url[scheme_size] == '?' || url[scheme_size] == '#') {
+        return false;
+    }
+    return std::none_of(url.begin(), url.end(),
+                        [](unsigned char c) { return std::isspace(c) || std::iscntrl(c); }) &&
+           std::none_of(vision.token.begin(), vision.token.end(),
+                        [](unsigned char c) { return c == '\r' || c == '\n'; });
+}
+}  // namespace
+
+void McpServer::ParseMessage(const std::string& message, ResponseSender response_sender) {
+    CJsonUniquePtr json(cJSON_ParseWithOpts(message.c_str(), nullptr, true));
     if (json == nullptr) {
-        ESP_LOGE(TAG, "Failed to parse MCP message: %s", message.c_str());
+        // Requests may contain credentials. Never log the original message.
+        ReplyError({}, -32700, "Parse error", response_sender);
         return;
     }
-    ParseMessage(json);
-    cJSON_Delete(json);
+    ParseMessage(json.get(), std::move(response_sender));
 }
 
 void McpServer::ParseCapabilities(const cJSON* capabilities) {
-    auto vision = cJSON_GetObjectItem(capabilities, "vision");
-    if (cJSON_IsObject(vision)) {
-        auto url = cJSON_GetObjectItem(vision, "url");
-        auto token = cJSON_GetObjectItem(vision, "token");
-        if (cJSON_IsString(url)) {
-            auto camera = Board::GetInstance().GetCamera();
-            if (camera) {
-                std::string url_str = std::string(url->valuestring);
-                std::string token_str;
-                if (cJSON_IsString(token)) {
-                    token_str = std::string(token->valuestring);
-                }
-                camera->SetExplainUrl(url_str, token_str);
-            }
+    auto config = ReadVisionConfig(cJSON_GetObjectItem(capabilities, "vision"));
+    if (config) {
+        if (auto camera = Board::GetInstance().GetCamera()) {
+            camera->SetExplainUrl(config->url, config->token);
         }
     }
 }
 
-void McpServer::ParseMessage(const cJSON* json) {
-    // Check JSONRPC version
-    auto version = cJSON_GetObjectItem(json, "jsonrpc");
-    if (version == nullptr || !cJSON_IsString(version) ||
-        strcmp(version->valuestring, "2.0") != 0) {
-        ESP_LOGE(TAG, "Invalid JSONRPC version: %s", version ? version->valuestring : "null");
+void McpServer::ParseMessage(const cJSON* json, ResponseSender response_sender) {
+    McpRequestContext context;
+    auto id = cJSON_GetObjectItemCaseSensitive(json, "id");
+    if (cJSON_IsString(id)) {
+        context.id_json = JsonString(id->valuestring);
+    } else if (cJSON_IsNumber(id) && std::isfinite(id->valuedouble) &&
+               std::trunc(id->valuedouble) == id->valuedouble &&
+               std::abs(id->valuedouble) <= 9007199254740991.0) {
+        // cJSON's floating formatter can round large safe integers. IDs must round-trip exactly.
+        context.id_json = std::to_string(static_cast<int64_t>(id->valuedouble));
+    }
+    auto version = cJSON_GetObjectItemCaseSensitive(json, "jsonrpc");
+    auto method = cJSON_GetObjectItemCaseSensitive(json, "method");
+    if (!cJSON_IsObject(json) || !cJSON_IsString(version) ||
+        strcmp(version->valuestring, "2.0") != 0 || !cJSON_IsString(method)) {
+        ReplyError(context, -32600, "Invalid Request", response_sender);
+        return;
+    }
+    if (id == nullptr) {
+        return;  // Notifications never execute request-only tools or receive a response.
+    }
+    if (context.id_json.empty()) {
+        ReplyError(context, -32600, "Invalid request ID", response_sender);
         return;
     }
 
-    // Check method
-    auto method = cJSON_GetObjectItem(json, "method");
-    if (method == nullptr || !cJSON_IsString(method)) {
-        ESP_LOGE(TAG, "Missing method");
-        return;
+    const std::string_view method_name(method->valuestring);
+    if (method_name.starts_with("notifications/")) {
+        return;  // Retain compatibility with notifications/initialized.
     }
-
-    auto method_str = std::string(method->valuestring);
-    if (method_str.find("notifications") == 0) {
-        return;
-    }
-
-    // Check params
-    auto params = cJSON_GetObjectItem(json, "params");
+    auto params = cJSON_GetObjectItemCaseSensitive(json, "params");
     if (params != nullptr && !cJSON_IsObject(params)) {
-        ESP_LOGE(TAG, "Invalid params for method: %s", method_str.c_str());
+        ReplyError(context, -32602, "Invalid params", response_sender);
+        return;
+    }
+    auto meta = cJSON_GetObjectItemCaseSensitive(params, "_meta");
+    auto protocol_version = cJSON_GetObjectItemCaseSensitive(meta, kProtocolVersion);
+    auto capabilities = cJSON_GetObjectItemCaseSensitive(meta, kClientCapabilities);
+    context.modern = method_name == "server/discover" || protocol_version || capabilities ||
+                     cJSON_GetObjectItemCaseSensitive(meta, "io.modelcontextprotocol/clientInfo") ||
+                     cJSON_GetObjectItemCaseSensitive(meta, "io.modelcontextprotocol/logLevel");
+    if ((meta && !cJSON_IsObject(meta)) ||
+        (context.modern && (!cJSON_IsString(protocol_version) || !cJSON_IsObject(capabilities)))) {
+        ReplyError(context, -32602, "Missing or invalid MCP request metadata", response_sender);
+        return;
+    }
+    if (context.modern && strcmp(protocol_version->valuestring, kModernVersion) != 0) {
+        std::string data = "{\"supported\":";
+        data += kSupportedVersions;
+        data += ",\"requested\":";
+        data += JsonString(protocol_version->valuestring);
+        data += "}";
+        ReplyError(context, -32022, "Unsupported protocol version", response_sender, data);
+        return;
+    }
+    auto extensions = cJSON_GetObjectItemCaseSensitive(capabilities, "extensions");
+    auto client_info = cJSON_GetObjectItemCaseSensitive(meta, "io.modelcontextprotocol/clientInfo");
+    if (context.modern &&
+        ((extensions && !cJSON_IsObject(extensions)) ||
+         (client_info &&
+          (!cJSON_IsObject(client_info) ||
+           !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(client_info, "name")) ||
+           !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(client_info, "version")))))) {
+        ReplyError(context, -32602, "Invalid MCP client capabilities or identity", response_sender);
         return;
     }
 
-    auto id = cJSON_GetObjectItem(json, "id");
-    if (id == nullptr || !cJSON_IsNumber(id)) {
-        ESP_LOGE(TAG, "Invalid id for method: %s", method_str.c_str());
-        return;
-    }
-    auto id_int = id->valueint;
-
-    if (method_str == "initialize") {
-        if (cJSON_IsObject(params)) {
-            auto capabilities = cJSON_GetObjectItem(params, "capabilities");
-            if (cJSON_IsObject(capabilities)) {
-                ParseCapabilities(capabilities);
-            }
+    if (method_name == "initialize" && !context.modern) {
+        ParseCapabilities(cJSON_GetObjectItem(params, "capabilities"));
+        std::string result =
+            "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":";
+        AppendServerInfo(result);
+        result += "}";
+        ReplyResult(context, result, response_sender);
+    } else if (method_name == "server/discover") {
+        std::string result = "{\"supportedVersions\":";
+        result += kSupportedVersions;
+        result += ",\"capabilities\":{\"tools\":{}";
+        if (std::any_of(tools_.begin(), tools_.end(), [](const auto& tool) {
+                return tool->name() == "self.camera.take_photo";
+            })) {
+            result += ",\"extensions\":{\"me.xiaozhi/vision\":{}}";
         }
-        auto app_desc = esp_app_get_description();
-        std::string message =
-            "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{"
-            "\"name\":\"" BOARD_NAME "\",\"version\":\"";
-        message += app_desc->version;
-        message += "\"}}";
-        ReplyResult(id_int, message);
-    } else if (method_str == "tools/list") {
-        std::string cursor_str = "";
-        bool list_user_only_tools = false;
-        if (params != nullptr) {
-            auto cursor = cJSON_GetObjectItem(params, "cursor");
-            if (cJSON_IsString(cursor)) {
-                cursor_str = std::string(cursor->valuestring);
-            }
-            auto with_user_tools = cJSON_GetObjectItem(params, "withUserTools");
-            if (cJSON_IsBool(with_user_tools)) {
-                list_user_only_tools = with_user_tools->valueint == 1;
-            }
-        }
-        GetToolsList(id_int, cursor_str, list_user_only_tools);
-    } else if (method_str == "tools/call") {
-        if (!cJSON_IsObject(params)) {
-            ESP_LOGE(TAG, "tools/call: Missing params");
-            ReplyError(id_int, "Missing params");
+        result += "},\"ttlMs\":60000,\"cacheScope\":\"private\"}";
+        ReplyResult(context, result, response_sender);
+    } else if (method_name == "tools/list") {
+        auto cursor = cJSON_GetObjectItemCaseSensitive(params, "cursor");
+        auto with_user_tools = cJSON_GetObjectItemCaseSensitive(params, "withUserTools");
+        if (context.modern && ((cursor && !cJSON_IsString(cursor)) ||
+                               (with_user_tools && !cJSON_IsBool(with_user_tools)))) {
+            ReplyError(context, -32602, "Invalid tool-list parameters", response_sender);
             return;
         }
-        auto tool_name = cJSON_GetObjectItem(params, "name");
-        if (!cJSON_IsString(tool_name)) {
-            ESP_LOGE(TAG, "tools/call: Missing name");
-            ReplyError(id_int, "Missing name");
+        GetToolsList(context, cJSON_IsString(cursor) ? cursor->valuestring : "",
+                     cJSON_IsTrue(with_user_tools), response_sender);
+    } else if (method_name == "tools/call") {
+        auto name = cJSON_GetObjectItemCaseSensitive(params, "name");
+        auto arguments = cJSON_GetObjectItemCaseSensitive(params, "arguments");
+        if (!cJSON_IsString(name) || (arguments && !cJSON_IsObject(arguments))) {
+            ReplyError(context, -32602, "Invalid tool name or arguments", response_sender);
             return;
         }
-        auto tool_arguments = cJSON_GetObjectItem(params, "arguments");
-        if (tool_arguments != nullptr && !cJSON_IsObject(tool_arguments)) {
-            ESP_LOGE(TAG, "tools/call: Invalid arguments");
-            ReplyError(id_int, "Invalid arguments");
+        auto tool = std::find_if(tools_.begin(), tools_.end(), [&](const auto& item) {
+            return item->name() == name->valuestring;
+        });
+        if (tool == tools_.end()) {
+            std::string error = "Unknown tool: ";
+            error += name->valuestring;
+            ReplyError(context, -32602, error, response_sender);
             return;
         }
-        DoToolCall(id_int, std::string(tool_name->valuestring), tool_arguments);
-    } else {
-        ESP_LOGE(TAG, "Method not implemented: %s", method_str.c_str());
-        ReplyError(id_int, "Method not implemented: " + method_str);
-    }
-}
-
-void McpServer::ReplyResult(int id, const std::string& result) {
-    std::string payload = "{\"jsonrpc\":\"2.0\",\"id\":";
-    payload += std::to_string(id) + ",\"result\":";
-    payload += result;
-    payload += "}";
-    Application::GetInstance().SendMcpMessage(payload);
-}
-
-void McpServer::ReplyError(int id, const std::string& message) {
-    std::string payload = "{\"jsonrpc\":\"2.0\",\"id\":";
-    payload += std::to_string(id);
-    payload += ",\"error\":{\"message\":\"";
-    payload += message;
-    payload += "\"}}";
-    Application::GetInstance().SendMcpMessage(payload);
-}
-
-void McpServer::GetToolsList(int id, const std::string& cursor, bool list_user_only_tools) {
-    const int max_payload_size = 8000;
-    std::string json = "{\"tools\":[";
-
-    bool found_cursor = cursor.empty();
-    auto it = tools_.begin();
-    std::string next_cursor = "";
-
-    while (it != tools_.end()) {
-        // 如果我们还没有找到起始位置，继续搜索
-        if (!found_cursor) {
-            if ((*it)->name() == cursor) {
-                found_cursor = true;
-            } else {
-                ++it;
-                continue;
+        if (context.modern && (*tool)->name() == "self.camera.take_photo") {
+            auto vision = cJSON_GetObjectItemCaseSensitive(extensions, kVisionExtension);
+            if (!vision) {
+                ReplyError(context, -32021, "Missing required client capability", response_sender,
+                           R"({"requiredCapabilities":{"extensions":{"me.xiaozhi/vision":{}}}})");
+                return;
             }
-        }
-
-        if (!list_user_only_tools && (*it)->user_only()) {
-            ++it;
-            continue;
-        }
-
-        // 添加tool前检查大小
-        std::string tool_json = (*it)->to_json() + ",";
-        if (json.length() + tool_json.length() + 30 > max_payload_size) {
-            // 如果添加这个tool会超出大小限制，设置next_cursor并退出循环
-            next_cursor = (*it)->name();
-            break;
-        }
-
-        json += tool_json;
-        ++it;
-    }
-
-    if (json.back() == ',') {
-        json.pop_back();
-    }
-
-    if (json.back() == '[' && !tools_.empty()) {
-        // 如果没有添加任何tool，返回错误
-        ESP_LOGE(TAG, "tools/list: Failed to add tool %s because of payload size limit",
-                 next_cursor.c_str());
-        ReplyError(id, "Failed to add tool " + next_cursor + " because of payload size limit");
-        return;
-    }
-
-    if (next_cursor.empty()) {
-        json += "]}";
-    } else {
-        json += "],\"nextCursor\":\"" + next_cursor + "\"}";
-    }
-
-    ReplyResult(id, json);
-}
-
-void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* tool_arguments) {
-    auto tool_iter = std::find_if(tools_.begin(), tools_.end(), [&tool_name](const McpTool* tool) {
-        return tool->name() == tool_name;
-    });
-
-    if (tool_iter == tools_.end()) {
-        ESP_LOGE(TAG, "tools/call: Unknown tool: %s", tool_name.c_str());
-        ReplyError(id, "Unknown tool: " + tool_name);
-        return;
-    }
-
-    PropertyList arguments = (*tool_iter)->properties();
-    try {
-        for (auto& argument : arguments) {
-            bool found = false;
-            if (cJSON_IsObject(tool_arguments)) {
-                auto value = cJSON_GetObjectItem(tool_arguments, argument.name().c_str());
-                if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
-                    argument.set_value<bool>(value->valueint == 1);
-                    found = true;
-                } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value)) {
-                    argument.set_value<int>(value->valueint);
-                    found = true;
-                } else if (argument.type() == kPropertyTypeString && cJSON_IsString(value)) {
-                    argument.set_value<std::string>(value->valuestring);
-                    found = true;
-                }
-            }
-
-            if (!argument.has_default_value() && !found) {
-                ESP_LOGE(TAG, "tools/call: Missing valid argument: %s", argument.name().c_str());
-                ReplyError(id, "Missing valid argument: " + argument.name());
+            auto token = cJSON_GetObjectItemCaseSensitive(vision, "token");
+            context.vision = ReadVisionConfig(vision);
+            if (!cJSON_IsObject(vision) || !context.vision || (token && !cJSON_IsString(token)) ||
+                !ValidVisionConfig(*context.vision)) {
+                ReplyError(context, -32602, "Invalid vision configuration", response_sender);
                 return;
             }
         }
-    } catch (const std::exception& e) {
-        ESP_LOGE(TAG, "tools/call: %s", e.what());
-        ReplyError(id, e.what());
+        DoToolCall(std::move(context), tool->get(), arguments, std::move(response_sender));
+    } else {
+        ReplyError(context, -32601, "Method not implemented: " + std::string(method_name),
+                   response_sender);
+    }
+}
+
+void McpServer::SendResponse(const std::string& payload, const ResponseSender& response_sender) {
+    if (response_sender) {
+        response_sender(payload);
+    } else {
+        Application::GetInstance().SendMcpMessage(payload);
+    }
+}
+
+void McpServer::ReplyResult(const McpRequestContext& context, const std::string& result,
+                            const ResponseSender& response_sender) {
+    auto payload = ResultPrefix(context);
+    // Include the final brace so appending it cannot double a large response buffer.
+    payload.reserve(payload.size() + result.size() + 1);
+    if (context.modern) {
+        // Merge known result objects into the envelope without parsing/copying a second JSON tree.
+        payload.pop_back();
+        if (result.size() > 2) {
+            payload += ",";
+        }
+        payload.append(result, 1, std::string::npos);
+    } else {
+        payload += result;
+    }
+    payload += "}";
+    SendResponse(payload, response_sender);
+}
+
+void McpServer::ReplyError(const McpRequestContext& context, int code, const std::string& message,
+                           const ResponseSender& response_sender, const std::string& data) {
+    auto encoded = JsonString(message.c_str());
+    if (encoded.empty()) {
         return;
     }
+    std::string payload;
+    payload.reserve(context.id_json.size() + encoded.size() + data.size() + 80);
+    payload += "{\"jsonrpc\":\"2.0\"";
+    if (!context.id_json.empty()) {
+        payload += ",\"id\":";
+        payload += context.id_json;
+    }
+    payload += ",\"error\":{\"code\":";
+    payload += std::to_string(code);
+    payload += ",\"message\":";
+    payload += encoded;
+    if (!data.empty()) {
+        payload += ",\"data\":";
+        payload += data;
+    }
+    payload += "}}";
+    SendResponse(payload, response_sender);
+}
 
-    // Network IO runs off the main loop. Only one worker is allowed at a time.
-    if (tool_name == "self.screen.show_image") {
+void McpServer::ReplyError(const McpRequestContext& context, const std::string& message,
+                           const ResponseSender& response_sender) {
+    ReplyError(context, -32603, message, response_sender);
+}
+
+void McpServer::ReplyToolCall(const McpRequestContext& context,
+                              const std::expected<std::string, std::string>& result,
+                              const ResponseSender& response_sender) {
+    if (result) {
+        ReplyResult(context, *result, response_sender);
+    } else if (context.modern) {
+        std::string error = "{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":";
+        error += JsonString(result.error().c_str());
+        error += "}]}";
+        ReplyResult(context, error, response_sender);
+    } else {
+        ReplyError(context, result.error(), response_sender);
+    }
+}
+
+void McpServer::GetToolsList(const McpRequestContext& context, const std::string& cursor,
+                             bool list_user_only_tools, const ResponseSender& response_sender) {
+    constexpr size_t kMaxPayloadSize = 8000;
+    const size_t envelope_size = ResultPrefix(context).size() + 2;
+    const std::string suffix = context.modern ? R"(],"ttlMs":60000,"cacheScope":"private")" : "]";
+    auto it = tools_.begin();
+    if (!cursor.empty()) {
+        it = std::find_if(it, tools_.end(),
+                          [&](const auto& tool) { return tool->name() == cursor; });
+        if (it == tools_.end()) {
+            ReplyError(context, -32602, "Invalid cursor", response_sender);
+            return;
+        }
+    }
+    auto visible = [&](auto position) {
+        while (position != tools_.end() && !list_user_only_tools && (*position)->user_only()) {
+            ++position;
+        }
+        return position;
+    };
+    it = visible(it);
+    std::string json = "{\"tools\":[";
+    std::string next_cursor;
+    bool added = false;
+    for (; it != tools_.end();) {
+        auto next = visible(it + 1);
+        auto tool_json = (*it)->to_json();
+        const auto cursor_json = next == tools_.end() ? "" : JsonString((*next)->name().c_str());
+        const size_t reserved = cursor_json.empty() ? 0 : cursor_json.size() + 14;
+        if (tool_json.empty() ||
+            json.size() + tool_json.size() + suffix.size() + reserved + envelope_size + 2 >
+                kMaxPayloadSize) {
+            if (!added) {
+                ReplyError(context, "Tool definition exceeds payload limit", response_sender);
+                return;
+            }
+            next_cursor = JsonString((*it)->name().c_str());
+            break;
+        }
+        if (added) {
+            json += ",";
+        }
+        json += tool_json;
+        added = true;
+        it = next;
+    }
+    json += suffix;
+    if (!next_cursor.empty()) {
+        json += ",\"nextCursor\":";
+        json += next_cursor;
+    }
+    json += "}";
+    ReplyResult(context, json, response_sender);
+}
+
+void McpServer::DoToolCall(McpRequestContext context, McpTool* tool, const cJSON* tool_arguments,
+                           ResponseSender response_sender) {
+    PropertyList arguments = tool->properties();
+    for (auto& argument : arguments) {
+        bool found = false;
+        std::expected<void, std::string> validation;
+        if (cJSON_IsObject(tool_arguments)) {
+            auto value = cJSON_GetObjectItem(tool_arguments, argument.name().c_str());
+            if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
+                validation = argument.set_value<bool>(value->valueint == 1);
+                found = true;
+            } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value) &&
+                       (!context.modern ||
+                        (std::isfinite(value->valuedouble) &&
+                         std::trunc(value->valuedouble) == value->valuedouble &&
+                         value->valuedouble >= INT_MIN && value->valuedouble <= INT_MAX))) {
+                validation = argument.set_value<int>(value->valueint);
+                found = true;
+            } else if (argument.type() == kPropertyTypeString && cJSON_IsString(value)) {
+                validation = argument.set_value<std::string>(value->valuestring);
+                found = true;
+            } else if (value != nullptr) {
+                ReplyError(context, -32602, "Invalid type for argument: " + argument.name(),
+                           response_sender);
+                return;
+            }
+        }
+        if (found && !validation) {
+            ReplyError(context, -32602, validation.error(), response_sender);
+            return;
+        }
+        if (!argument.has_default_value() && !found) {
+            ReplyError(context, -32602, "Missing required argument: " + argument.name(),
+                       response_sender);
+            return;
+        }
+    }
+#ifdef HAVE_LVGL
+    // Image downloads run at low priority and report through the originating request on the
+    // application task. Admission is shared by both transports and both MCP revisions.
+    if (tool->name() == kShowImageTool) {
         if (image_download_busy_.exchange(true)) {
-            ReplyError(id, "An image download is already in progress");
+            ReplyToolCall(context, std::unexpected("An image download is already in progress"),
+                          response_sender);
             return;
         }
-        auto previous_config = esp_pthread_get_default_config();
-        esp_pthread_get_cfg(&previous_config);
-        auto config = previous_config;
-        config.stack_size = 8192;
-        config.prio = 1;
-        config.thread_name = "image_download";
-        if (esp_pthread_set_cfg(&config) != ESP_OK) {
+        struct DownloadJob {
+            McpServer* server;
+            McpRequestContext context;
+            McpTool* tool;
+            PropertyList arguments;
+            ResponseSender response_sender;
+        };
+        auto* job = new (std::nothrow) DownloadJob{
+            this, std::move(context), tool, std::move(arguments), std::move(response_sender)};
+        if (job == nullptr) {
             image_download_busy_ = false;
-            ReplyError(id, "Failed to configure image download worker");
+            ReplyToolCall(context, std::unexpected("Failed to allocate image download worker"),
+                          response_sender);
             return;
         }
-        try {
-            std::thread([this, id, tool = *tool_iter, arguments = std::move(arguments)]() {
-                std::string result;
-                std::string error;
-                try {
-                    result = tool->Call(arguments);
-                } catch (const std::exception& exception) {
-                    error = exception.what();
+        const auto started = xTaskCreate(
+            [](void* opaque) {
+                {
+                    std::unique_ptr<DownloadJob> job(static_cast<DownloadJob*>(opaque));
+                    auto result = job->tool->Call(job->arguments, job->context);
+                    Application::GetInstance().Schedule(
+                        [server = job->server, context = std::move(job->context),
+                         response_sender = std::move(job->response_sender),
+                         result = std::move(result)]() {
+                            server->image_download_busy_ = false;
+                            server->ReplyToolCall(context, result, response_sender);
+                        });
                 }
-                Application::GetInstance().Schedule([this, id, result, error]() {
-                    image_download_busy_ = false;
-                    if (error.empty()) {
-                        ReplyResult(id, result);
-                    } else {
-                        ReplyError(id, error);
-                    }
-                });
-            }).detach();
-        } catch (const std::exception&) {
+                vTaskDelete(nullptr);
+            },
+            "image_download", 8192, job, 1, nullptr);
+        if (started != pdPASS) {
+            std::unique_ptr<DownloadJob> failed_job(job);
             image_download_busy_ = false;
-            ReplyError(id, "Failed to start image download worker");
+            ReplyToolCall(failed_job->context,
+                          std::unexpected("Failed to start image download worker"),
+                          failed_job->response_sender);
         }
-        esp_pthread_set_cfg(&previous_config);
         return;
     }
+#endif
 
-    // Use main thread to call the tool
-    auto& app = Application::GetInstance();
-    app.Schedule([this, id, tool_iter, arguments = std::move(arguments)]() {
-        try {
-            ReplyResult(id, (*tool_iter)->Call(arguments));
-        } catch (const std::exception& e) {
-            ESP_LOGE(TAG, "tools/call: %s", e.what());
-            ReplyError(id, e.what());
-        }
+    // Reuse the existing application task. Context owns ID/vision after input JSON is destroyed.
+    Application::GetInstance().Schedule([this, context = std::move(context), tool,
+                                         arguments = std::move(arguments),
+                                         response_sender = std::move(response_sender)]() {
+        ReplyToolCall(context, tool->Call(arguments, context), response_sender);
     });
 }

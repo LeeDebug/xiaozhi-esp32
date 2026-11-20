@@ -1,0 +1,85 @@
+{
+    "type": "big-herdsman",
+    "target": "esp32p4",
+    "builds": [
+        {
+            "name": "big-herdsman-p4",
+            "sdkconfig_append": [
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/big-herdsman-16m.csv\"",
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
+                "CONFIG_UAC_FREQ_NUM_MAX=16",
+                "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
+                "CONFIG_CAMERA_OV5647=y",
+                "CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y",
+                "CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP=y",
+                "CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y",
+                "CONFIG_ESP32P4_REV_MIN_100=y",
+                "CONFIG_FMB_COMM_MODE_TCP_EN=n",
+                "CONFIG_FMB_COMM_MODE_RTU_EN=y",
+                "CONFIG_FMB_COMM_MODE_ASCII_EN=n",
+                "CONFIG_FMB_MASTER_TIMEOUT_MS_RESPOND=1000",
+                "CONFIG_FMB_MASTER_MAX_API_BLOCKING_TIME_MS=3000"
+            ]
+        },
+        {
+            "name": "big-herdsman-p4x",
+            "sdkconfig_append": [
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/big-herdsman-16m.csv\"",
+                "CONFIG_OTA_STAGE_IN_PSRAM=y",
+                "CONFIG_SPIRAM_XIP_FROM_PSRAM=n",
+                "CONFIG_FREERTOS_IN_IRAM=y",
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
+                "CONFIG_UAC_FREQ_NUM_MAX=16",
+                "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
+                "CONFIG_CAMERA_OV5647=y",
+                "CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y",
+                "CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP=y",
+                "CONFIG_FMB_COMM_MODE_TCP_EN=n",
+                "CONFIG_FMB_COMM_MODE_RTU_EN=y",
+                "CONFIG_FMB_COMM_MODE_ASCII_EN=n",
+                "CONFIG_FMB_MASTER_TIMEOUT_MS_RESPOND=1000",
+                "CONFIG_FMB_MASTER_MAX_API_BLOCKING_TIME_MS=3000"
+            ]
+        },
+        {
+            "name": "big-herdsman-p4-ap0316",
+            "sdkconfig_append": [
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/big-herdsman-16m.csv\"",
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
+                "CONFIG_UAC_FREQ_NUM_MAX=16",
+                "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
+                "CONFIG_CAMERA_OV5647=y",
+                "CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y",
+                "CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP=y",
+                "CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y",
+                "CONFIG_ESP32P4_REV_MIN_100=y",
+                "CONFIG_FMB_COMM_MODE_TCP_EN=n",
+                "CONFIG_FMB_COMM_MODE_RTU_EN=y",
+                "CONFIG_FMB_COMM_MODE_ASCII_EN=n",
+                "CONFIG_FMB_MASTER_TIMEOUT_MS_RESPOND=1000",
+                "CONFIG_FMB_MASTER_MAX_API_BLOCKING_TIME_MS=3000"
+            ]
+        },
+        {
+            "name": "big-herdsman-p4x-ap0316",
+            "sdkconfig_append": [
+                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/big-herdsman-16m.csv\"",
+                "CONFIG_XIAOZHI_NETWORK_ETHERNET=y",
+                "CONFIG_UAC_FREQ_NUM_MAX=16",
+                "CONFIG_USE_WECHAT_MESSAGE_STYLE=y",
+                "CONFIG_CAMERA_OV5647=y",
+                "CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_OV5647_MIPI_RAW8_800X800_50FPS=y",
+                "CONFIG_XIAOZHI_ENABLE_CAMERA_ENDIANNESS_SWAP=y",
+                "CONFIG_FMB_COMM_MODE_TCP_EN=n",
+                "CONFIG_FMB_COMM_MODE_RTU_EN=y",
+                "CONFIG_FMB_COMM_MODE_ASCII_EN=n",
+                "CONFIG_FMB_MASTER_TIMEOUT_MS_RESPOND=1000",
+                "CONFIG_FMB_MASTER_MAX_API_BLOCKING_TIME_MS=3000"
+            ]
+        }
+    ]
+}

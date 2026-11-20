@@ -6,22 +6,22 @@
 
 #include <driver/gpio.h>
 #include <esp_eth.h>
-#include <esp_idf_version.h>
-#include <cJSON.h>
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0) && CONFIG_XIAOZHI_ETH_PHY_IP101
-#include <esp_eth_phy_ip101.h>
-#endif
 #include <esp_event.h>
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <esp_netif.h>
 #include <esp_network.h>
+#include <cJSON.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <material_symbols.h>
 #include <soc/soc_caps.h>
 
 #include <utility>
+
+#if CONFIG_XIAOZHI_ETH_PHY_IP101
+#include <esp_eth_phy_ip101.h>
+#endif
 
 static const char* TAG = "EthernetBoard";
 
@@ -39,8 +39,7 @@ static eth_esp32_emac_config_t CreateEmacConfig() {
     config.smi_gpio.mdio_num = CONFIG_XIAOZHI_ETH_MDIO_GPIO;
     config.interface = EMAC_DATA_INTERFACE_RMII;
     config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
-    config.clock_config.rmii.clock_gpio =
-        static_cast<decltype(config.clock_config.rmii.clock_gpio)>(50);
+    config.clock_config.rmii.clock_gpio = 50;
     config.dma_burst_len = ETH_DMA_BURST_LEN_32;
     config.intr_priority = 0;
 #if SOC_EMAC_USE_MULTI_IO_MUX || SOC_EMAC_MII_USE_GPIO_MATRIX
@@ -53,8 +52,7 @@ static eth_esp32_emac_config_t CreateEmacConfig() {
 #endif
 #if !SOC_EMAC_RMII_CLK_OUT_INTERNAL_LOOPBACK
     config.clock_config_out_in.rmii.clock_mode = EMAC_CLK_EXT_IN;
-    config.clock_config_out_in.rmii.clock_gpio =
-        static_cast<decltype(config.clock_config_out_in.rmii.clock_gpio)>(-1);
+    config.clock_config_out_in.rmii.clock_gpio = -1;
 #endif
     config.mdc_freq_hz = 0;
     return config;
@@ -300,6 +298,8 @@ std::string EthernetBoard::GetDeviceStatusJson() {
         cJSON_AddNumberToObject(chip, "temperature", temp);
         cJSON_AddItemToObject(root, "chip", chip);
     }
+
+    AddSystemStatus(root);
 
     auto str = cJSON_PrintUnformatted(root);
     std::string result(str);

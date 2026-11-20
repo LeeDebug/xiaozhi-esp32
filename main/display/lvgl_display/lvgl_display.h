@@ -24,26 +24,18 @@ public:
     virtual void SetStatus(const char* status);
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string& notification, int duration_ms = 3000);
-    // Takes ownership of the encoded image and shows a dismissible full-screen overlay.
-    void ShowImagePopup(void* data, size_t size);
-
-    virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
+    virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
-    virtual bool SnapshotToJpeg(std::string& jpeg_data, int quality = 80);
+    virtual bool SnapshotToJpeg(std::string& jpeg_data, int quality = 80) override;
     virtual bool AddTextGlyphs(const std::vector<TextGlyph>& glyphs, uint8_t bpp) override;
     virtual void ClearTextGlyphs() override;
-    bool SetTextFont(std::shared_ptr<LvglFont> text_font);
+    virtual bool SetTextFont(std::shared_ptr<LvglFont> text_font) override;
+    virtual bool SupportsGuiOperations() const override { return true; }
+    bool SupportsImagePopup() const override;
+    const char* ShowImagePopup(ImageBuffer data, size_t size) override;
 
 protected:
-    // Popup widgets are retained; closing releases only the image and its caches.
-    lv_obj_t* image_popup_ = nullptr;
-    lv_obj_t* image_popup_picture_ = nullptr;
-    lv_obj_t* image_popup_close_ = nullptr;
-    std::unique_ptr<LvglImage> image_popup_image_;
-    uint32_t image_popup_generation_ = 0;
-    void ClearImagePopupLocked();
-    void CloseImagePopup(uint32_t generation);
     esp_pm_lock_handle_t pm_lock_ = nullptr;
     lv_display_t* display_ = nullptr;
 
@@ -61,11 +53,21 @@ protected:
 
     std::chrono::system_clock::time_point last_status_update_time_;
     esp_timer_handle_t notification_timer_ = nullptr;
+    int last_displayed_clock_min_ = -1;   // -1 forces update on first idle tick
     std::unique_ptr<DynamicGlyphCache> dynamic_glyph_cache_;
 
     friend class DisplayLockGuard;
     virtual bool Lock(int timeout_ms = 0) = 0;
     virtual void Unlock() = 0;
+
+private:
+    void ClearImagePopupLocked();
+
+    lv_obj_t* image_popup_ = nullptr;
+    lv_obj_t* image_popup_picture_ = nullptr;
+    lv_obj_t* image_popup_close_ = nullptr;
+    std::unique_ptr<LvglAllocatedImage> image_popup_image_;
+    std::unique_ptr<lv_image_decoder_dsc_t> image_popup_png_;
 };
 
 #endif

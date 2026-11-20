@@ -27,6 +27,7 @@ protected:
     lv_obj_t* emoji_label_ = nullptr;
     lv_obj_t* emoji_image_ = nullptr;
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
+    bool emotion_uses_image_ = false;
     lv_obj_t* emoji_box_ = nullptr;
     lv_obj_t* chat_message_label_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
@@ -34,6 +35,7 @@ protected:
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
     void InitializeLcdThemes();
+    void ShowEmotion();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
 
@@ -44,8 +46,9 @@ protected:
 
 public:
     ~LcdDisplay();
-    virtual void SetEmotion(const char* emotion) override;
+    virtual bool SetEmotion(const char* emotion) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
+    virtual void RemoveChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void SetupUI() override;
@@ -53,7 +56,7 @@ public:
     virtual void SetTheme(Theme* theme) override;
 
     // Set whether to hide chat messages/subtitles
-    void SetHideSubtitle(bool hide);
+    virtual void SetHideSubtitle(bool hide) override;
 };
 
 // SPI LCD display
@@ -77,7 +80,7 @@ class MipiLcdDisplay : public LcdDisplay {
 public:
     MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width,
                    int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y,
-                   bool swap_xy);
+                   bool swap_xy, bool use_landscape_psram = false);
 };
 
 #endif  // LCD_DISPLAY_H

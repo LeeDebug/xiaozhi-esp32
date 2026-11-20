@@ -1,4 +1,4 @@
-.workbuddy/
+/.workbuddy/
 
 tmp/
 components/*
@@ -8,7 +8,6 @@ build/
 dist/
 .vscode/
 .devcontainer/
-sdkconfig.old
 dependencies.lock
 .env
 releases/

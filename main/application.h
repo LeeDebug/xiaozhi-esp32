@@ -6,17 +6,21 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 
+#include <atomic>
 #include <string>
 #include <mutex>
 #include <deque>
 #include <memory>
 #include <functional>
+#include <cstdint>
+#include <vector>
 
 #include "protocol.h"
 #include "ota.h"
 #include "audio_service.h"
 #include "device_state.h"
 #include "device_state_machine.h"
+#include "notify/notify_player.h"
 
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
@@ -33,7 +37,9 @@
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 #define MAIN_EVENT_PLAYBACK_DRAINED     (1 << 13)
-#define MAIN_EVENT_TTS_DRAIN_CHECK (1 << 14)
+#define MAIN_EVENT_STARTUP_HINT_TIMEOUT (1 << 14)
+#define MAIN_EVENT_PROTOCOL_PENDING (1 << 15)
+#define MAIN_EVENT_TTS_DRAIN_CHECK (1 << 16)
 
 enum AecMode {
     kAecOff,
@@ -78,6 +84,7 @@ public:
      * Schedule a callback to be executed in the main task
      */
     void Schedule(std::function<void()>&& callback);
+    void NotifyProtocolPending() { xEventGroupSetBits(event_group_, MAIN_EVENT_PROTOCOL_PENDING); }
 
     /**
      * Alert with status, message, emotion and optional sound
@@ -133,21 +140,27 @@ private:
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t tts_drain_timer_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
+    esp_timer_handle_t startup_wake_word_hint_timer_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
+    std::string startup_wake_word_hint_message_;
     AudioService audio_service_;
+    NotifyPlayer notify_player_;
+    uint32_t notification_playback_id_ = 0;
     std::unique_ptr<Ota> ota_;
 
     std::function<void(const std::string&)> mcp_broadcast_callback_;
 
     bool has_server_time_ = false;
-    std::atomic<bool> aborted_{false};
+    bool startup_completed_ = false;
+    bool pending_startup_wake_word_hint_ = false;
+    bool aborted_ = false;
     // Receive-side admission metadata, separate from main-task device state.
     std::mutex tts_admission_mutex_;
-    std::atomic<bool> accepting_tts_audio_{false};
-    std::atomic<uint32_t> incoming_tts_generation_{0};
+    bool accepting_tts_audio_ = false;
+    uint32_t incoming_tts_generation_ = 0;
     std::atomic<uint32_t> incoming_tts_epoch_{0};
     bool pending_tts_stop_ = false;
     uint32_t pending_tts_stop_epoch_ = 0;
@@ -174,6 +187,11 @@ private:
     void ContinueWakeWordInvoke(const std::string& wake_word);
     void StartListeningAudio();
     void ConfigureWakeWordForListening();
+    void ShowStartupWakeWordHint();
+    void HideStartupWakeWordHint();
+    void StartNotification(std::string audio_url, std::vector<NotifySubtitle> subtitles);
+    void StopNotification();
+    void HandleNotificationFinished(uint32_t playback_id, bool success);
     void HandleVoiceInterruption(uint32_t generation);
     void FinishTtsPlayback();
     void CheckTtsPlaybackStopped();

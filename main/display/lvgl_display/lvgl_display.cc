@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-#include <stdexcept>
 #include <string>
 
 #include "application.h"
@@ -18,9 +17,68 @@
 #include "lvgl_display.h"
 #include "lvgl_theme.h"
 #include "settings.h"
+#include "src/draw/lv_image_decoder_private.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
 
 #define TAG "Display"
+
+namespace {
+enum class PopupImageFormat { kUnsupported, kPng, kJpeg };
+
+PopupImageFormat GetPopupImageFormat(const uint8_t* data, size_t size) {
+    if (data == nullptr || size < 4) {
+        return PopupImageFormat::kUnsupported;
+    }
+    [[maybe_unused]] auto valid_dimensions = [](uint32_t width, uint32_t height) {
+        return width > 0 && height > 0 && width <= 2048 && height <= 2048 &&
+               width * height <= 1024 * 1024;
+    };
+#if LV_USE_LODEPNG
+    constexpr uint8_t png_signature[] = {137, 80, 78, 71, 13, 10, 26, 10};
+    constexpr uint8_t png_ihdr[] = {0, 0, 0, 13, 'I', 'H', 'D', 'R'};
+    if (size >= 33 && std::memcmp(data, png_signature, sizeof(png_signature)) == 0 &&
+        std::memcmp(data + sizeof(png_signature), png_ihdr, sizeof(png_ihdr)) == 0) {
+        auto read_be32 = [](const uint8_t* value) -> uint32_t {
+            return (uint32_t(value[0]) << 24) | (uint32_t(value[1]) << 16) |
+                   (uint32_t(value[2]) << 8) | value[3];
+        };
+        if (valid_dimensions(read_be32(data + 16), read_be32(data + 20))) {
+            return PopupImageFormat::kPng;
+        }
+    }
+#endif
+#ifndef CONFIG_IDF_TARGET_ESP32
+    if (data[0] == 0xff && data[1] == 0xd8) {
+        // The software JPEG decoder accepts baseline frames. Bound the pixel buffer
+        // before decoding by checking the dimensions in the JPEG frame header.
+        size_t offset = 2;
+        while (offset + 4 <= size && data[offset++] == 0xff) {
+            while (offset < size && data[offset] == 0xff) {
+                ++offset;
+            }
+            if (offset + 3 > size) {
+                break;
+            }
+            const uint8_t marker = data[offset++];
+            const size_t length = (size_t(data[offset]) << 8) | data[offset + 1];
+            if (marker == 0xda || marker == 0xd9 || length < 2 || length > size - offset) {
+                break;
+            }
+            if (marker == 0xc0 && length >= 8) {
+                const auto height = (uint32_t(data[offset + 3]) << 8) | data[offset + 4];
+                const auto width = (uint32_t(data[offset + 5]) << 8) | data[offset + 6];
+                if (valid_dimensions(width, height)) {
+                    return PopupImageFormat::kJpeg;
+                }
+                break;
+            }
+            offset += length;
+        }
+    }
+#endif
+    return PopupImageFormat::kUnsupported;
+}
+}  // namespace
 
 LvglDisplay::LvglDisplay() {
     dynamic_glyph_cache_ = std::make_unique<DynamicGlyphCache>();
@@ -95,16 +153,19 @@ bool LvglDisplay::AddTextGlyphs(const std::vector<TextGlyph>& glyphs, uint8_t bp
     }
 
     DisplayLockGuard lock(this);
-    auto theme = dynamic_cast<LvglTheme*>(current_theme_);
-    if (theme == nullptr || theme->text_font() == nullptr) {
+    if (!lock || current_theme_ == nullptr) {
+        return false;
+    }
+    auto text_font = current_theme_->GetTextFont();
+    if (text_font == nullptr) {
         return false;
     }
 
-    auto fallback = dynamic_glyph_cache_->EnsureFont(theme->text_font()->font(), bpp);
+    auto fallback = dynamic_glyph_cache_->EnsureFont(text_font->font(), bpp);
     if (fallback == nullptr) {
         return false;
     }
-    theme->text_font()->SetFallback(fallback);
+    text_font->SetFallback(fallback);
     return dynamic_glyph_cache_->AddGlyphs(glyphs);
 }
 
@@ -117,6 +178,9 @@ void LvglDisplay::ClearTextGlyphs() {
 }
 
 LvglDisplay::~LvglDisplay() {
+    if (image_popup_ != nullptr) {
+        lv_obj_delete(image_popup_);
+    }
     if (notification_timer_ != nullptr) {
         esp_timer_stop(notification_timer_);
         esp_timer_delete(notification_timer_);
@@ -215,22 +279,25 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         }
     }
 
-    // Update time
+    // Update time — show HH:MM when idle; refresh immediately on state
+    // transitions (update_all=true) and on every minute change thereafter.
     if (app.GetDeviceState() == kDeviceStateIdle) {
-        if (last_status_update_time_ + std::chrono::seconds(10) <
-            std::chrono::system_clock::now()) {
-            // Set status to clock "HH:MM"
-            time_t now = time(NULL);
-            struct tm* tm = localtime(&now);
-            // Check if the we have already set the time
-            if (tm->tm_year >= 2025 - 1900) {
+        time_t now = time(NULL);
+        struct tm* tm_now = localtime(&now);
+        if (tm_now->tm_year >= 2025 - 1900) {
+            int cur_min = tm_now->tm_hour * 60 + tm_now->tm_min;
+            if (update_all || cur_min != last_displayed_clock_min_) {
+                last_displayed_clock_min_ = cur_min;
                 char time_str[16];
-                strftime(time_str, sizeof(time_str), "%H:%M", tm);
+                strftime(time_str, sizeof(time_str), "%H:%M", tm_now);
                 SetStatus(time_str);
-            } else {
-                ESP_LOGW(TAG, "System time is not set, tm_year: %d", tm->tm_year);
             }
+        } else {
+            ESP_LOGW(TAG, "System time not set (tm_year=%d)", tm_now->tm_year);
         }
+    } else {
+        // Reset so the clock re-appears immediately when idle resumes.
+        last_displayed_clock_min_ = -1;
     }
 
     esp_pm_lock_acquire(pm_lock_);
@@ -305,47 +372,76 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
     esp_pm_lock_release(pm_lock_);
 }
 
-void LvglDisplay::ShowImagePopup(void* data, size_t size) {
-    // Keep ownership even if decoder validation throws. LVGL decoders require the display lock.
-    std::unique_ptr<void, decltype(&heap_caps_free)> buffer(data, heap_caps_free);
-    std::unique_ptr<LvglImage> image;
+bool LvglDisplay::SupportsImagePopup() const {
+#if LV_USE_LODEPNG || !defined(CONFIG_IDF_TARGET_ESP32)
+    return display_ != nullptr && !IsMonochrome();
+#else
+    return false;
+#endif
+}
+
+const char* LvglDisplay::ShowImagePopup(ImageBuffer data, size_t size) {
+    if (!data) {
+        return "Image data is unavailable";
+    }
+    const auto* bytes = static_cast<const uint8_t*>(data.get());
+    const auto format = GetPopupImageFormat(bytes, size);
+    if (format == PopupImageFormat::kUnsupported) {
+        return "Unsupported image format or dimensions exceed the limit";
+    }
+
+    std::unique_ptr<LvglAllocatedImage> image;
 #ifndef CONFIG_IDF_TARGET_ESP32
-    const auto* bytes = static_cast<const uint8_t*>(data);
-    if (size >= 2 && bytes[0] == 0xff && bytes[1] == 0xd8) {
+    if (format == PopupImageFormat::kJpeg) {
         uint8_t* pixels = nullptr;
         size_t pixel_size = 0, width = 0, height = 0, stride = 0;
         if (jpeg_to_image(bytes, size, &pixels, &pixel_size, &width, &height, &stride) != ESP_OK) {
-            throw std::runtime_error("Failed to decode JPEG");
+            return "Failed to decode JPEG";
         }
-        std::unique_ptr<void, decltype(&heap_caps_free)> decoded(pixels, heap_caps_free);
-        image = std::make_unique<LvglAllocatedImage>(pixels, pixel_size, width, height, stride,
-                                                     LV_COLOR_FORMAT_RGB565);
+        ImageBuffer decoded(pixels, heap_caps_free);
+        image = std::make_unique<LvglAllocatedImage>(decoded.get(), pixel_size, width, height,
+                                                     stride, LV_COLOR_FORMAT_RGB565);
         decoded.release();
     }
 #endif
-    // Unlike DisplayLockGuard, do not continue or unlock if acquisition fails.
-    if (!Lock(30000)) {
-        throw std::runtime_error("Failed to lock display for image popup");
+
+    DisplayLockGuard lock(this);
+    if (!lock || display_ == nullptr) {
+        return "Screen is unavailable";
     }
-    auto unlock = [](LvglDisplay* display) { display->Unlock(); };
-    std::unique_ptr<LvglDisplay, decltype(unlock)> lock(this, unlock);
-    if (!display_) {
-        throw std::runtime_error("Screen is unavailable");
-    }
-    if (!image) {
-        image = std::make_unique<LvglAllocatedImage>(data, size);
-        buffer.release();
-    }
-    const auto* descriptor = image->image_dsc();
-    if (descriptor->header.w == 0 || descriptor->header.h == 0) {
-        throw std::runtime_error("Invalid image dimensions");
+    std::unique_ptr<lv_image_decoder_dsc_t> png;
+    const lv_image_dsc_t* descriptor = nullptr;
+    const void* source = nullptr;
+    if (format == PopupImageFormat::kPng) {
+        image = std::make_unique<LvglAllocatedImage>(data.get(), size);
+        data.release();
+        if (!image->IsValid()) {
+            return "Invalid PNG header";
+        }
+        // Hold the decoded draw buffer directly so its lifetime does not depend on cache size.
+        png = std::make_unique<lv_image_decoder_dsc_t>();
+        lv_image_decoder_args_t args{};
+        args.no_cache = true;
+        args.stride_align = LV_DRAW_BUF_STRIDE_ALIGN != 1;
+        if (lv_image_decoder_open(png.get(), image->image_dsc(), &args) != LV_RESULT_OK) {
+            lv_image_cache_drop(image->image_dsc());
+            return "Failed to decode PNG";
+        }
+        if (png->decoded == nullptr) {
+            lv_image_decoder_close(png.get());
+            lv_image_cache_drop(image->image_dsc());
+            return "PNG decoder produced no image";
+        }
+        descriptor = image->image_dsc();
+        source = png->decoded;
+    } else {
+        descriptor = image->image_dsc();
+        source = descriptor;
     }
 
-    // Keep the small widget tree alive to avoid destroying an input event target.
-    // All accesses here are protected by the successfully acquired display lock.
     const int screen_width = lv_display_get_horizontal_resolution(display_);
     const int screen_height = lv_display_get_vertical_resolution(display_);
-    if (!image_popup_) {
+    if (image_popup_ == nullptr) {
         image_popup_ = lv_obj_create(lv_display_get_layer_top(display_));
         lv_obj_remove_style_all(image_popup_);
         lv_obj_set_pos(image_popup_, 0, 0);
@@ -353,7 +449,6 @@ void LvglDisplay::ShowImagePopup(void* data, size_t size) {
         lv_obj_set_style_bg_opa(image_popup_, LV_OPA_COVER, 0);
         lv_obj_remove_flag(image_popup_, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
         image_popup_picture_ = lv_image_create(image_popup_);
         image_popup_close_ = lv_button_create(image_popup_);
         auto* label = lv_label_create(image_popup_close_);
@@ -362,20 +457,27 @@ void LvglDisplay::ShowImagePopup(void* data, size_t size) {
         lv_obj_add_event_cb(
             image_popup_close_,
             [](lv_event_t* event) {
-                // The LVGL port holds its lock while dispatching this callback. Defer image
-                // release to the main task, which acquires the same lock explicitly.
                 auto* display = static_cast<LvglDisplay*>(lv_event_get_user_data(event));
-                const auto generation = display->image_popup_generation_;
-                Application::GetInstance().Schedule(
-                    [display, generation]() { display->CloseImagePopup(generation); });
+                // The input event already holds the display lock. Keep the widgets alive.
+                display->ClearImagePopupLocked();
             },
             LV_EVENT_CLICKED, this);
+        lv_obj_add_event_cb(
+            image_popup_,
+            [](lv_event_t* event) {
+                auto* display = static_cast<LvglDisplay*>(lv_event_get_user_data(event));
+                display->ClearImagePopupLocked();
+                display->image_popup_ = nullptr;
+                display->image_popup_picture_ = nullptr;
+                display->image_popup_close_ = nullptr;
+            },
+            LV_EVENT_DELETE, this);
     }
     ClearImagePopupLocked();
-    ++image_popup_generation_;
     image_popup_image_ = std::move(image);
+    image_popup_png_ = std::move(png);
     lv_obj_set_size(image_popup_, screen_width, screen_height);
-    lv_image_set_src(image_popup_picture_, image_popup_image_->image_dsc());
+    lv_image_set_src(image_popup_picture_, source);
     // Cover the screen while preserving aspect ratio, rounding up to avoid edge gaps.
     const int scale =
         std::max((screen_width * 256 + descriptor->header.w - 1) / descriptor->header.w,
@@ -388,33 +490,25 @@ void LvglDisplay::ShowImagePopup(void* data, size_t size) {
     lv_obj_move_foreground(image_popup_close_);
     lv_obj_move_foreground(image_popup_);
     lv_obj_remove_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
+    return nullptr;
 }
 
 void LvglDisplay::ClearImagePopupLocked() {
-    // Caller must hold the display lock. Detach before freeing source memory.
-    if (image_popup_) {
-        lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
-        lv_image_set_src(image_popup_picture_, nullptr);
+    lv_obj_add_flag(image_popup_, LV_OBJ_FLAG_HIDDEN);
+    if (!image_popup_image_) {
+        return;
     }
-    if (image_popup_image_) {
+    const auto* source = lv_image_get_src(image_popup_picture_);
+    lv_image_set_src(image_popup_picture_, nullptr);
+    if (source != nullptr) {
+        lv_image_cache_drop(source);
+    }
+    if (image_popup_png_ != nullptr) {
+        lv_image_decoder_close(image_popup_png_.get());
+        image_popup_png_.reset();
         lv_image_cache_drop(image_popup_image_->image_dsc());
-        image_popup_image_.reset();
     }
-}
-
-void LvglDisplay::CloseImagePopup(uint32_t generation) {
-    if (!Lock(30000)) {
-        ESP_LOGE(TAG, "Failed to lock display to close image popup");
-        return;
-    }
-    auto unlock = [](LvglDisplay* display) { display->Unlock(); };
-    std::unique_ptr<LvglDisplay, decltype(unlock)> lock(this, unlock);
-    // Ignore a duplicate click or a close queued before a newer image was displayed.
-    if (generation != image_popup_generation_ || !image_popup_image_) {
-        return;
-    }
-    ClearImagePopupLocked();
-    ESP_LOGI(TAG, "Image popup closed; image source and caches released");
+    image_popup_image_.reset();
 }
 
 void LvglDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {}
